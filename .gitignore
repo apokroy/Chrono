@@ -1,0 +1,37 @@
+# Build.ps1 output (binaries, DCUs, Linux sysroot)
+Build/
+
+# Delphi compiler output
+*.dcu
+*.o
+*.exe
+*.exp
+*.lnk
+*.map
+*.drc
+*.rsm
+*.tds
+*.dbg
+
+# IDE output folders created when a .dpr is opened in the IDE
+Win32/
+Win64/
+Linux64/
+OSX64/
+OSXARM64/
+
+# IDE state and generated project files
+__history/
+__recovery/
+*.local
+*.identcache
+*.dsk
+*.stat
+*.tvsconfig
+*.res
+*.dproj
+*.dproj.local
+*.groupproj.local
+
+# Test results
+dunitx-results.xml
