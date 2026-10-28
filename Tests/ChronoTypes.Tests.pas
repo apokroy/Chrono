@@ -196,7 +196,15 @@ uses
   ChronoTypes.Russian, ChronoTypes.Ukrainian, ChronoTypes.Belarusian, ChronoTypes.Polish,
   ChronoTypes.Czech, ChronoTypes.German, ChronoTypes.French, ChronoTypes.Italian,
   ChronoTypes.Spanish, ChronoTypes.Portuguese, ChronoTypes.Dutch, ChronoTypes.Danish,
-  ChronoTypes.Swedish;
+  ChronoTypes.Swedish, ChronoTypes.Chinese, ChronoTypes.Hindi, ChronoTypes.Arabic,
+  ChronoTypes.Bengali, ChronoTypes.Japanese, ChronoTypes.Turkish, ChronoTypes.Korean,
+  ChronoTypes.Vietnamese, ChronoTypes.Indonesian, ChronoTypes.Persian, ChronoTypes.Urdu,
+  ChronoTypes.Romanian, ChronoTypes.Hungarian, ChronoTypes.Greek, ChronoTypes.Finnish,
+  ChronoTypes.Norwegian, ChronoTypes.Slovak, ChronoTypes.Bulgarian, ChronoTypes.Serbian,
+  ChronoTypes.Croatian, ChronoTypes.Lithuanian, ChronoTypes.Latvian, ChronoTypes.Estonian,
+  ChronoTypes.Slovenian, ChronoTypes.Catalan, ChronoTypes.Kazakh, ChronoTypes.Uzbek,
+  ChronoTypes.Azerbaijani, ChronoTypes.Georgian, ChronoTypes.Armenian, ChronoTypes.Kyrgyz,
+  ChronoTypes.Tajik, ChronoTypes.Turkmen;
 
 function D(const Year, Month, Day: Word): Chrono.TDate;
 begin
@@ -1942,7 +1950,13 @@ end;
 function Languages: TArray<Chrono.TLocale>;
 begin
   Result := [RussianLocale, UkrainianLocale, BelarusianLocale, PolishLocale, CzechLocale, GermanLocale,
-    FrenchLocale, ItalianLocale, SpanishLocale, PortugueseLocale, DutchLocale, DanishLocale, SwedishLocale];
+    FrenchLocale, ItalianLocale, SpanishLocale, PortugueseLocale, DutchLocale, DanishLocale, SwedishLocale,
+    ChineseLocale, HindiLocale, ArabicLocale, BengaliLocale, JapaneseLocale, TurkishLocale, KoreanLocale,
+    VietnameseLocale, IndonesianLocale, PersianLocale, UrduLocale, RomanianLocale, HungarianLocale,
+    GreekLocale, FinnishLocale, NorwegianLocale, SlovakLocale, BulgarianLocale, SerbianLocale,
+    CroatianLocale, LithuanianLocale, LatvianLocale, EstonianLocale, SlovenianLocale, CatalanLocale,
+    KazakhLocale, UzbekLocale, AzerbaijaniLocale, GeorgianLocale, ArmenianLocale, KyrgyzLocale,
+    TajikLocale, TurkmenLocale];
 end;
 
 procedure TLocaleTests.TearDown;
@@ -2106,20 +2120,53 @@ end;
 procedure TLocaleTests.LanguageSamples;
 const
   // The name of the locale; 2026-10-27 as "d mmmm yyyy" and as "mmmm yyyy"; TPeriod 1, 3, 10.
-  Samples: array[0..12, 0..3] of string = (
-    ('ru', '27 октября 2026',      'Октябрь 2026',     '1г 3мес 10дн'),
-    ('uk', '27 жовтня 2026',       'жовтень 2026',     '1р 3міс 10дн'),
-    ('be', '27 кастрычніка 2026',  'кастрычнік 2026',  '1г 3мес 10дз'),
+  Samples: array[0..45, 0..3] of string = (
+    ('ru', '27 октября 2026', 'Октябрь 2026', '1г 3мес 10дн'),
+    ('uk', '27 жовтня 2026', 'жовтень 2026', '1р 3міс 10дн'),
+    ('be', '27 кастрычніка 2026', 'кастрычнік 2026', '1г 3мес 10дз'),
     ('pl', '27 października 2026', 'październik 2026', '1r 3mies 10dz'),
-    ('cs', '27 října 2026',        'říjen 2026',       '1r 3měs 10d'),
-    ('de', '27 Oktober 2026',      'Oktober 2026',     '1J 3M 10T'),
-    ('fr', '27 octobre 2026',      'octobre 2026',     '1a 3mois 10j'),
-    ('it', '27 ottobre 2026',      'ottobre 2026',     '1a 3m 10g'),
-    ('es', '27 octubre 2026',      'octubre 2026',     '1a 3m 10d'),
-    ('pt', '27 outubro 2026',      'outubro 2026',     '1a 3m 10d'),
-    ('nl', '27 oktober 2026',      'oktober 2026',     '1j 3mnd 10d'),
-    ('da', '27 oktober 2026',      'oktober 2026',     '1år 3md 10d'),
-    ('sv', '27 oktober 2026',      'oktober 2026',     '1år 3mån 10d')
+    ('cs', '27 října 2026', 'říjen 2026', '1r 3měs 10d'),
+    ('de', '27 Oktober 2026', 'Oktober 2026', '1J 3M 10T'),
+    ('fr', '27 octobre 2026', 'octobre 2026', '1a 3mois 10j'),
+    ('it', '27 ottobre 2026', 'ottobre 2026', '1a 3m 10g'),
+    ('es', '27 octubre 2026', 'octubre 2026', '1a 3m 10d'),
+    ('pt', '27 outubro 2026', 'outubro 2026', '1a 3m 10d'),
+    ('nl', '27 oktober 2026', 'oktober 2026', '1j 3mnd 10d'),
+    ('da', '27 oktober 2026', 'oktober 2026', '1år 3md 10d'),
+    ('sv', '27 oktober 2026', 'oktober 2026', '1år 3mån 10d'),
+    ('zh', '27 十月 2026', '十月 2026', '1年 3个月 10天'),
+    ('hi', '27 अक्तूबर 2026', 'अक्तूबर 2026', '1वर्ष 3माह 10दिन'),
+    ('ar', '27 أكتوبر 2026', 'أكتوبر 2026', '1سنة 3شهر 10يوم'),
+    ('bn', '27 অক্টোবর 2026', 'অক্টোবর 2026', '1বছর 3মাস 10দিন'),
+    ('ja', '27 10月 2026', '10月 2026', '1年 3か月 10日'),
+    ('tr', '27 Ekim 2026', 'Ekim 2026', '1yıl 3ay 10gün'),
+    ('ko', '27 10월 2026', '10월 2026', '1년 3개월 10일'),
+    ('vi', '27 Tháng Mười 2026', 'Tháng Mười 2026', '1năm 3tháng 10ngày'),
+    ('id', '27 Oktober 2026', 'Oktober 2026', '1thn 3bln 10hr'),
+    ('fa', '27 اکتبر 2026', 'اکتبر 2026', '1سال 3ماه 10روز'),
+    ('ur', '27 اکتوبر 2026', 'اکتوبر 2026', '1سال 3ماہ 10دن'),
+    ('ro', '27 octombrie 2026', 'octombrie 2026', '1a 3l 10z'),
+    ('hu', '27 október 2026', 'október 2026', '1é 3hó 10n'),
+    ('el', '27 Οκτωβρίου 2026', 'Οκτώβριος 2026', '1έτ 3μήν 10ημ'),
+    ('fi', '27 lokakuuta 2026', 'lokakuu 2026', '1v 3kk 10pv'),
+    ('nb', '27 oktober 2026', 'oktober 2026', '1år 3md 10d'),
+    ('sk', '27 októbra 2026', 'október 2026', '1r 3mes 10d'),
+    ('bg', '27 октомври 2026', 'октомври 2026', '1г 3мес 10д'),
+    ('sr', '27 октобар 2026', 'октобар 2026', '1г 3мес 10д'),
+    ('hr', '27 listopada 2026', 'listopad 2026', '1g 3mj 10d'),
+    ('lt', '27 spalio 2026', 'spalis 2026', '1m 3mėn 10d'),
+    ('lv', '27 oktobris 2026', 'oktobris 2026', '1g 3mēn 10d'),
+    ('et', '27 oktoober 2026', 'oktoober 2026', '1a 3k 10p'),
+    ('sl', '27 oktober 2026', 'oktober 2026', '1l 3mes 10d'),
+    ('ca', '27 d’octubre 2026', 'octubre 2026', '1a 3m 10d'),
+    ('kk', '27 қазан 2026', 'Қазан 2026', '1ж 3ай 10күн'),
+    ('uz', '27 oktabr 2026', 'Oktabr 2026', '1yil 3oy 10kun'),
+    ('az', '27 oktyabr 2026', 'oktyabr 2026', '1il 3ay 10gün'),
+    ('ka', '27 ოქტომბერი 2026', 'ოქტომბერი 2026', '1წ 3თვ 10დღ'),
+    ('hy', '27 հոկտեմբերի 2026', 'Հոկտեմբեր 2026', '1տ 3ամս 10օր'),
+    ('ky', '27 октябрь 2026', 'Октябрь 2026', '1ж 3ай 10күн'),
+    ('tg', '27 октябр 2026', 'октябр 2026', '1с 3моҳ 10рӯз'),
+    ('tk', '27 oktýabr 2026', 'Oktýabr 2026', '1ý 3aý 10g')
   );
 var
   Locales: TArray<Chrono.TLocale>;

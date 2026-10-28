@@ -65,10 +65,12 @@ API may still change.
   built from any dictionary by key (`TLocale.Keys`); `TLocale.English` and
   `TLocale.System`. A translated error message with other `Format` arguments
   than the English one is ignored; `MissingKeys` lists what a translation lacks.
-- Locales for 13 languages, one unit each: `ChronoTypes.Russian`, `Ukrainian`,
-  `Belarusian`, `Polish`, `Czech`, `German`, `French`, `Italian`, `Spanish`,
-  `Portuguese`, `Dutch`, `Danish` and `Swedish`. The month and weekday names are
-  those of Windows; `ChronoTypes.Russian` is also a template for another language.
+- Locales for 46 languages, one unit each (`ChronoTypes.German` gives
+  `GermanLocale`; the list is in README). The month and weekday names are those
+  of the Gregorian calendar of the Windows locales, in composed Unicode (NFC),
+  with the slips of the Windows data fixed: Persian and Urdu spelt with their own
+  letters instead of Arabic ones, Turkmen Iýun and Iýul with I instead of l.
+  `ChronoTypes.Russian` is also a template for another language.
 - Genitive month names: `TDate.Format`, `TDateTime.Format` and `ToString` put a
   full month name next to a day number in the genitive case ("27 октября 2026"),
   and month names are parsed in it too.

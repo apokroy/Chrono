@@ -47,7 +47,7 @@ end;
 - **Time zone offsets** in `+HH:MM`, `+HHMM` and RFC 5322 named forms.
 - **Translatable**: month and weekday names, names of date and time units and
   error messages come from a `Chrono.TLocale`, with month names in the genitive
-  case where a language needs it ("27 октября 2026"). Locales for 13 languages
+  case where a language needs it ("27 октября 2026"). Locales for 46 languages
   are included, and a locale for any other language can be built from any
   dictionary.
 - **Fast without lookup tables**: dates are encoded and decoded with a few
@@ -172,26 +172,16 @@ The texts that Chrono produces itself — month and weekday names, names of date
 and time units, error messages — come from `Chrono.Locale`. By default it is
 `Chrono.TLocale.System`: month and weekday names of the global `FormatSettings`
 (that is, of the OS) and English for the rest. Other languages come in separate
-units, one per language:
+units, one per language: `ChronoTypes.German` gives `GermanLocale`, and so on for
+Arabic, Armenian, Azerbaijani (Latin), Belarusian, Bengali, Bulgarian, Catalan,
+Chinese (simplified), Croatian, Czech, Danish, Dutch, Estonian, Finnish, French,
+Georgian, German, Greek, Hindi, Hungarian, Indonesian, Italian, Japanese, Kazakh,
+Korean, Kyrgyz, Latvian, Lithuanian, Norwegian (Bokmål), Persian, Polish,
+Portuguese, Romanian, Russian, Serbian (Cyrillic), Slovak, Slovenian, Spanish,
+Swedish, Tajik, Turkish, Turkmen, Ukrainian, Urdu, Uzbek (Latin) and Vietnamese.
 
-| Unit | Locale | `d mmmm yyyy` |
-|---|---|---|
-| `ChronoTypes.Russian` | `RussianLocale` | 27 октября 2026 |
-| `ChronoTypes.Ukrainian` | `UkrainianLocale` | 27 жовтня 2026 |
-| `ChronoTypes.Belarusian` | `BelarusianLocale` | 27 кастрычніка 2026 |
-| `ChronoTypes.Polish` | `PolishLocale` | 27 października 2026 |
-| `ChronoTypes.Czech` | `CzechLocale` | 27 října 2026 |
-| `ChronoTypes.German` | `GermanLocale` | 27 Oktober 2026 |
-| `ChronoTypes.French` | `FrenchLocale` | 27 octobre 2026 |
-| `ChronoTypes.Italian` | `ItalianLocale` | 27 ottobre 2026 |
-| `ChronoTypes.Spanish` | `SpanishLocale` | 27 octubre 2026 |
-| `ChronoTypes.Portuguese` | `PortugueseLocale` | 27 outubro 2026 |
-| `ChronoTypes.Dutch` | `DutchLocale` | 27 oktober 2026 |
-| `ChronoTypes.Danish` | `DanishLocale` | 27 oktober 2026 |
-| `ChronoTypes.Swedish` | `SwedishLocale` | 27 oktober 2026 |
-
-The month and weekday names are those of the Windows locale of the language, so
-a program prints the same names on every platform:
+The month and weekday names are those of the Gregorian calendar of the Windows
+locale of the language, so a program prints the same names on every platform:
 
 ```pascal
 uses
@@ -205,7 +195,9 @@ uses
 ```
 
 A full month name next to a day number is put in the genitive case, the rule
-Windows uses: `d mmmm` gives "27 октября", `mmmm yyyy` gives "Октябрь 2026".
+Windows uses: `d mmmm` gives "27 октября", `mmmm yyyy` gives "Октябрь 2026". The
+locales of other languages that change the month there have that form too:
+"27 października", "27 Οκτωβρίου", "27 lokakuuta", "27 d’octubre", "27 қазан".
 
 Every text has a key — `month.october`, `month.october.genitive`,
 `month.october.short`, `weekday.monday`, `part.year.short`, `error.date-range`
@@ -215,15 +207,15 @@ table or a hash table:
 
 ```pascal
 var
-  Finnish: Chrono.TLocale;
+  Swahili: Chrono.TLocale;
 begin
-  Finnish := Chrono.TLocale.Create('fi', Chrono.TLocale.English,
+  Swahili := Chrono.TLocale.Create('sw', Chrono.TLocale.English,
     function(Key: string): string        // no const: the signature of TFunc<string, string>
     begin
       if not Dictionary.TryGetValue(Key, Result) then
         Result := '';                    // empty: the text of the base locale (English here)
     end);
-  Chrono.Locale := Finnish;
+  Chrono.Locale := Swahili;
 ```
 
 A translated error message must take the same `Format` arguments as the English
