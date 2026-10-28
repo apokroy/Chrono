@@ -11,6 +11,10 @@
     or let the script create Build\Linux64\sysroot from a WSL distribution that
     has libc6-dev and gcc installed. Linux64 binaries are run inside WSL.
 
+    Before that, Tests\CompileFail.dpr is compiled with the Win64 compiler to
+    check that statements which must not compile (D1 + D2, Date := Now, ...) are
+    rejected with the expected errors.
+
     Everything is written to the Build folder. Delphi is located through the
     BDS environment variable or, if it is not set, the registry (latest version).
 
@@ -120,7 +124,8 @@ function Build-Project([string] $Project, [string] $TargetPlatform) {
     $dcuDir = Join-Path $exeDir "dcu\$name"
     New-Item -ItemType Directory -Force $dcuDir | Out-Null
 
-    $options = @('-B', '-Q', "-E$exeDir", "-NU$dcuDir", "-U$(Join-Path $Root 'Source')")
+    # Overflow and range checks on: the unit must work in projects that enable them.
+    $options = @('-B', '-Q', '-$Q+', '-$R+', "-E$exeDir", "-NU$dcuDir", "-U$(Join-Path $Root 'Source')")
     switch ($TargetPlatform) {
         'Win32' {
             $compiler = 'dcc32.exe'
@@ -161,6 +166,56 @@ function Build-Project([string] $Project, [string] $TargetPlatform) {
     return $exe
 }
 
+# Compiles Tests\CompileFail.dpr as it is, which must succeed, and then once per
+# "{$IFDEF SYMBOL} ... {$ENDIF} // E<code>" line with SYMBOL defined, which must
+# fail with that error on that line. Returns the checks that did not.
+function Test-CompileFail {
+    $project = Join-Path $Root 'Tests\CompileFail.dpr'
+    $outDir = Join-Path $BuildDir 'CompileFail'
+    $dcuDir = Join-Path $outDir 'dcu'
+    New-Item -ItemType Directory -Force $dcuDir | Out-Null
+    $compiler = Join-Path $Bds 'bin\dcc64.exe'
+    $options = @('-Q', "-E$outDir", "-NU$dcuDir", "-U$(Join-Path $Root 'Source')", '-NSSystem;Winapi')
+
+    $checks = @(Select-String -LiteralPath $project -Pattern '^\s*\{\$IFDEF (\w+)\}.*\{\$ENDIF\}\s*//\s*(E\d{4})' |
+        ForEach-Object {
+            [pscustomobject]@{
+                Symbol = $_.Matches[0].Groups[1].Value
+                Error  = $_.Matches[0].Groups[2].Value
+                Line   = $_.LineNumber
+            }
+        })
+
+    Write-Host "== Checking that $($checks.Count) invalid statements do not compile" -ForegroundColor Cyan
+    $failures = @()
+    Push-Location (Split-Path $project)
+    try {
+        # Without any symbol the program must compile. -B also builds ChronoTypes.dcu,
+        # so each check below recompiles only the program itself.
+        $output = & $compiler -B @options (Split-Path $project -Leaf) | Out-String
+        if ($LASTEXITCODE) {
+            Write-Host $output
+            return @('does not compile without checks')
+        }
+        foreach ($check in $checks) {
+            $output = & $compiler @options "-D$($check.Symbol)" (Split-Path $project -Leaf) | Out-String
+            if ($LASTEXITCODE -eq 0) {
+                $failures += "$($check.Symbol) compiles"
+                continue
+            }
+            $actual = if ($output -match "\($($check.Line)\)[^\r\n]*\b([EF]\d{4})\b") { $Matches[1] } else { 'no error on its line' }
+            if ($actual -ne $check.Error) {
+                Write-Host $output
+                $failures += "$($check.Symbol) gives $actual instead of $($check.Error)"
+            }
+        }
+    }
+    finally {
+        Pop-Location
+    }
+    return $failures
+}
+
 function Invoke-Binary([string] $Exe, [string] $TargetPlatform, [string[]] $Arguments = @()) {
     Write-Host "== Running $([IO.Path]::GetFileName($Exe)) ($TargetPlatform)" -ForegroundColor Cyan
     if ($TargetPlatform -eq 'Linux64') {
@@ -176,6 +231,10 @@ $Bds = Get-DelphiRoot
 Write-Host "Delphi: $Bds"
 
 $failed = @()
+foreach ($failure in Test-CompileFail) {
+    $failed += "CompileFail: $failure"
+}
+
 foreach ($target in $Platform) {
     $tests = Build-Project (Join-Path $Root 'Tests\ChronoTests.dpr') $target
     if (-not $NoRun) {

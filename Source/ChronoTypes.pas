@@ -23,7 +23,7 @@ unit ChronoTypes;
 interface
 
 uses
-  System.Types, System.SysUtils, System.Variants, System.Generics.Collections
+  System.SysUtils, System.Variants
   {$IFDEF MSWINDOWS}, Winapi.Windows{$ENDIF}
   {$IFDEF POSIX}, Posix.SysTypes, Posix.Time, Posix.SysTime{$ENDIF};
 
@@ -53,7 +53,7 @@ type
 
     TSetOfWeekdays = set of TWeekdayNum;
 
-    /// <summary>Date component used for rounding/truncation (used together with <see cref="TTimePart"/> by APIs that work with date granularity).</summary>
+    /// <summary>A date unit; GetName and GetShortName give its name in Chrono.Locale (used by TPeriod.ToString).</summary>
     TDatePart = (
       Year,
       Quarter,
@@ -62,23 +62,100 @@ type
       Day
     );
 
-    /// <summary>Time component used for rounding/truncation.</summary>
+    /// <summary>A time unit, down to the millisecond precision of the library; GetName and GetShortName give its name in Chrono.Locale.</summary>
     TTimePart = (
-      Second,
       Hour,
       Minute,
-      Millisecond,
-      Microsecond,
-      Nanosecond
+      Second,
+      Millisecond
     );
 
-    /// <summary>Decoded calendar date components with no range validation
-    /// (a lightweight DTO for the internal <c>DateYMD</c>/<c>YMDDate</c> lookup tables).</summary>
-    TDateParts = record
-      Y: Word;
-      M: Word;
-      D: Word;
+  {$region 'Locale'}
+    /// <summary>
+    ///  The texts the library produces itself, in one language: month names (also in the
+    ///  genitive case, as in "27 октября"), weekday names, names of date and time parts and
+    ///  error messages. Methods without a FormatSettings parameter take them from
+    ///  <see cref="Chrono.Locale"/>; methods with one use its month and weekday names.
+    /// </summary>
+    /// <remarks>
+    ///  A locale never changes after it is created, so threads read it without locking and
+    ///  switching Chrono.Locale is a single assignment. Free a locale only when it is no
+    ///  longer Chrono.Locale and no thread uses it: usually create it at startup and free it
+    ///  at shutdown. TLocale.English and TLocale.System belong to the library.
+    ///
+    ///  Every text has a key: 'month.october', 'month.october.genitive',
+    ///  'month.october.short', 'weekday.monday', 'weekday.monday.short', 'part.year',
+    ///  'part.year.short', 'part.hour', 'error.date-range' and so on; Keys lists them all.
+    ///  A new locale asks its Lookup function for every key, so translations can come from
+    ///  any dictionary: a file, a database table, a hash table.
+    /// </remarks>
+    TLocale = class
+    public type
+      /// <summary>The error messages of the library. Each takes fixed Format arguments, see the English texts.</summary>
+      TError = (
+        InvalidTimeZone,
+        InvalidQuarter,
+        InvalidMonthName,
+        InvalidWeekdayName,
+        InvalidYear,
+        InvalidMonth,
+        InvalidDay,
+        InvalidQuarterNumber,
+        InvalidWeekday,
+        InvalidDate,
+        InvalidDayOfYear,
+        DateRange,
+        InvalidTime,
+        TimeRange
+      );
+    private class var
+      FEnglish: TLocale;
+      FSystem: TLocale;
+    private
+      FName: string;
+      FTexts: TArray<string>;
+      // TLocale.System: the month and weekday names follow the global FormatSettings.
+      FFollowsFormatSettings: Boolean;
+      function  Text(const Index: Integer): string;
+    public
+      /// <summary>
+      ///  A locale named Name. Each text is Lookup(Key). The text of Base (TLocale.English
+      ///  when Base is nil) is taken instead when Lookup is nil or returns an empty string,
+      ///  and for an error message whose Format arguments differ from those of the Base text.
+      /// </summary>
+      constructor Create(const Name: string; const Base: TLocale; const Lookup: TFunc<string, string>);
+      destructor Destroy; override;
+      /// <summary>The keys of all texts, in a fixed order.</summary>
+      class function Keys: TArray<string>; static;
+      /// <summary>Full month name standing alone: "October", "Октябрь".</summary>
+      function  MonthName(const Month: TMonthNum): string;
+      /// <summary>Full month name after a day number: "27 октября". Equal to MonthName in languages without cases.</summary>
+      function  GenitiveMonthName(const Month: TMonthNum): string;
+      function  ShortMonthName(const Month: TMonthNum): string;
+      /// <summary>Weekday name. Day is in Chrono numbering (1 = Sunday), as the index of LongDayNames.</summary>
+      function  DayName(const Day: TWeekdayNum): string;
+      function  ShortDayName(const Day: TWeekdayNum): string;
+      function  PartName(const Part: TDatePart; const Short: Boolean = False): string; overload;
+      function  PartName(const Part: TTimePart; const Short: Boolean = False): string; overload;
+      /// <summary>The Format string of an error message.</summary>
+      function  ErrorText(const Error: TError): string;
+      /// <summary>
+      ///  A copy of FormatSettings with the month and weekday names of this locale, for
+      ///  FormatDateTime with the format string Format. If Format puts a day number next to a
+      ///  full month name ("d mmmm"), the full month names are genitive: the rule Windows uses.
+      /// </summary>
+      function  Apply(const FormatSettings: TFormatSettings; const Format: string): TFormatSettings;
+      property  Name: string read FName;
+      /// <summary>English texts, independent of the OS settings.</summary>
+      class property English: TLocale read FEnglish;
+      /// <summary>
+      ///  The default Chrono.Locale: the month and weekday names of the global FormatSettings
+      ///  (of the OS, unless the program changes them), with genitive month names equal to
+      ///  the nominative ones; English for everything else.
+      /// </summary>
+      class property System: TLocale read FSystem;
     end;
+  {$endregion}
 
   {$region 'Duration'}
     /// <summary>
@@ -192,39 +269,32 @@ type
       function  GetDay: TWeekdayNum; inline;
       procedure SetDay(const Value: TWeekdayNum);  inline;
     public
-      /// <summary>Name of the day as in LongDayNames of the global FormatSettings.</summary>
+      /// <summary>Full name of the day in Chrono.Locale.</summary>
       function  ToString: string; overload; inline;
       ///<summary>
       ///  Name of the day as in LongDayNames of FormatSettings parameter
       ///</summary>
       function  ToString(const FormatSettings: TFormatSettings): string; overload; inline;
-      ///<summary>
-      ///  Name of the day as in LongDayNames of system global FormatSettings
-      ///</summary>
+      /// <summary>Full name of the day in Chrono.Locale.</summary>
       function  LongName: string; overload; inline;
       ///<summary>
       ///  Name of the day as in LongDayNames of FormatSettings parameter
       ///</summary>
       function  LongName(const FormatSettings: TFormatSettings): string; overload; inline;
-      ///<summary>
-      ///  Name of the day as in ShortDayNames of system global FormatSettings
-      ///</summary>
+      /// <summary>Short name of the day in Chrono.Locale.</summary>
       function  ShortName: string; overload; inline;
       ///<summary>
       ///  Name of the day as in ShortDayNames of FormatSettings parameter
       ///</summary>
       function  ShortName(const FormatSettings: TFormatSettings): string; overload; inline;
-      ///<summary>
-      ///  Try parse Value using system global FormatSettings properties LongDayNames and ShortDayNames.
-      ///  Case insensitive
-      ///</summary>
+      /// <summary>Parses a full or short day name of Chrono.Locale, case-insensitively.</summary>
       procedure Parse(const Value: string); overload;
       ///<summary>
       ///  Try parse Value using FormatSettings properties LongDayNames and ShortDayNames.
       ///  Case insensitive
       ///</summary>
       procedure Parse(const Value: string; const FormatSettings: TFormatSettings); overload;
-      function  TryParse(const Value: string): Boolean; overload; inline;
+      function  TryParse(const Value: string): Boolean; overload;
       function  TryParse(const Value: string; const FormatSettings: TFormatSettings): Boolean; overload; inline;
       /// <summary>
       ///  Ordinal of the day (1..7) relative to an arbitrary "first day of week"
@@ -244,18 +314,22 @@ type
       /// </summary>
       property  Day: TWeekdayNum read GetDay write SetDay;
     public
-      // The comparison/arithmetic operators below work on the internal FDay
-      // directly (fixed numbering Sun=1..Sat=7), so Monday + 1 = Tuesday
-      // regardless of FirstDayOfWeek — this is arithmetic on the "absolute" day
-      // number. There is no wrap-around: Saturday + 1 is out of range.
+      // The comparison/arithmetic operators below work on the fixed numbering
+      // (Sun=1..Sat=7), so Monday + 1 = Tuesday regardless of FirstDayOfWeek.
+      // Adding or subtracting a number of days wraps around the week:
+      // Saturday + 1 = Sunday, Sunday - 1 = Saturday. Subtracting two weekdays
+      // gives the signed difference of their numbers (-6..6).
+      //
+      // A number converts to TWeekday implicitly and is validated (EConvertError
+      // outside 1..7); a TWeekday converts to a number only explicitly — Word(Day).
       function GetHashCode: Integer;
       class operator Add(const a: TWeekday; b: Word): TWeekday; inline;
       class operator Subtract(const a, b: TWeekday): Integer; inline;
       class operator Subtract(const a: TWeekday; const b: Word): TWeekday; inline;
       class operator Implicit(const a: Word): TWeekday; inline;
-      class operator Implicit(const a: TWeekday): Word; inline;
+      class operator Explicit(const a: TWeekday): Word; inline;
       class operator Implicit(const a: TWeekdayNum): TWeekday; inline;
-      class operator Implicit(const a: TWeekday): TWeekdayNum; inline;
+      class operator Explicit(const a: TWeekday): TWeekdayNum; inline;
       class operator Explicit(const a: TWeekday): string; inline;
       class operator Explicit(const a: string): TWeekday; inline;
       class operator Equal(const a, b: TWeekday) : Boolean; inline;
@@ -315,9 +389,8 @@ type
     PDay = ^TDay;
     /// <summary>
     ///  A day of the month (1..31), not bound to any particular month or year.
-    ///  The range is not validated on assignment — that is the caller's
-    ///  responsibility. Note that <see cref="TDate.Day"/> does NOT clamp the value
-    ///  to the length of the month either (unlike <see cref="TDate.Month"/>).
+    ///  Values outside 1..31 raise EConvertError; whether the day exists in a
+    ///  particular month is checked when it is combined into a TDate.
     /// </summary>
     TDay = record
     private
@@ -326,14 +399,20 @@ type
       function ToString: string;
       function GetHashCode: Integer;
     public
-      // The standard set of implicit/explicit conversions and comparison/arithmetic
-      // operators, with the same meaning for TDay/TYear/TMonth/TQuarter:
-      //  - Implicit(Word) both ways — lossless conversion;
-      //  - Explicit(string) both ways — formatting/parsing via IntToStr/StrToInt,
-      //    may raise EConvertError on an invalid string;
-      //  - Add/Subtract/Multiply/IntDivide — arithmetic without range validation of the result.
+      // The standard set of conversions and operators, with the same meaning
+      // for TDay/TYear/TMonth/TQuarter/TWeekday:
+      //  - a number converts to the type implicitly and is validated
+      //    (EConvertError outside the valid range), so literals can be used
+      //    directly: Date.WithDay(1), Date.WithYear(2025), Date.Month = 12;
+      //  - the type converts to a number only explicitly — Word(Day) — so a day
+      //    cannot silently be passed where a month or a plain number is expected;
+      //  - Explicit(string) both ways formats/parses via IntToStr/StrToInt and
+      //    raises EConvertError on an invalid string;
+      //  - arithmetic keeps the result valid: TMonth, TQuarter and TWeekday wrap
+      //    around (December + 1 = January), TDay and TYear raise EConvertError
+      //    when the result leaves the valid range.
       class operator Implicit(const a: Word): TDay; inline;
-      class operator Implicit(const a: TDay): Word; inline;
+      class operator Explicit(const a: TDay): Word; inline;
       class operator Explicit(const a: string): TDay; inline;
       class operator Explicit(const a: TDay): string; inline;
       class operator Add(const a: TDay; const b: Word): TDay; inline;
@@ -355,14 +434,12 @@ type
     PYear = ^TYear;
 
     /// <summary>
-    ///  A calendar year.
-    ///  Implicitly compatible with Word.
+    ///  A calendar year, 1..9999 (the same range as System.TDateTime).
     /// </summary>
     /// <remarks>
-    ///  The year is stored as an unsigned Word (0..65535). In particular,
-    ///  <c>TYear(0) - 1</c> (via Dec/Subtract) overflows the Word instead of
-    ///  producing a negative year — years BC are not supported by this type at all.
-    ///  Leap-year lookup (<see cref="IsLeap"/>) is table-driven and covers years 0..10000.
+    ///  A number converts to TYear implicitly and is validated: years outside
+    ///  1..9999, including year 0 and years BC, raise EConvertError, and so does
+    ///  arithmetic whose result leaves that range. Convert back with Word(Year).
     /// </remarks>
     TYear = record
     private
@@ -373,15 +450,13 @@ type
       /// <summary>
       ///  True if the year is a leap year under the proleptic Gregorian rule
       ///  (divisible by 4 but not by 100, or divisible by 400).
-      ///  Implemented as a lookup in the precomputed <c>YearIsLeap</c> table
-      ///  (see Chrono.Leap.inc) instead of computing it on the fly — for speed.
       /// </summary>
       function  IsLeap: Boolean; inline;
       function  ToString: string;
       function  GetHashCode: Integer;
     public
       class operator Implicit(const a: Word): TYear; inline;
-      class operator Implicit(const a: TYear): Word; inline;
+      class operator Explicit(const a: TYear): Word; inline;
       class operator Explicit(const a: string): TYear; inline;
       class operator Explicit(const a: TYear): string; inline;
       class operator Add(const a: TYear; const b: Word): TYear; inline;
@@ -445,10 +520,10 @@ type
       class operator Subtract(const a, b: TQuarter): Integer; inline;
       class operator Subtract(const a: TQuarter; const b: Word): TQuarter; inline;
       class operator Implicit(const a: Word): TQuarter; inline;
-      class operator Implicit(const a: TQuarter): Word; inline;
+      class operator Explicit(const a: TQuarter): Word; inline;
       class operator Implicit(const a: TQuarterNum): TQuarter; inline;
-      class operator Implicit(const a: TQuarter): TQuarterNum; inline;
-      class operator Explicit(const a: string): TQuarter; inline;
+      class operator Explicit(const a: TQuarter): TQuarterNum; inline;
+      class operator Explicit(const a: string): TQuarter;
       class operator Explicit(const a: TQuarter): string; inline;
       class operator Equal(const a, b: TQuarter) : Boolean; inline;
       class operator NotEqual(const a, b: TQuarter) : Boolean; inline;
@@ -477,6 +552,7 @@ type
     ///  The private <c>Index</c> property is a linear "quarters since year 0" index:
     ///  <c>Year * 4 + Quarter - 1</c>. Add/Subtract/Inc/Dec and comparisons are
     ///  implemented on top of it, which gives seamless crossing of year boundaries.
+    ///  A result outside the years 1..9999 raises EConvertError.
     /// </remarks>
     TQuarterOfYear = record
     private
@@ -544,11 +620,11 @@ type
         property  Count: Integer read FCount;
       end;
     public
-      /// <summary>Full month name (LongMonthNames of the global FormatSettings).</summary>
+      /// <summary>Full month name in Chrono.Locale.</summary>
       function  ToString: string; overload; inline;
       /// <summary>Full month name (LongMonthNames of the given FormatSettings).</summary>
       function  ToString(const FormatSettings: TFormatSettings): string; overload; inline;
-      /// <summary>Month name: short (Short=True, ShortMonthNames) or full (LongMonthNames).</summary>
+      /// <summary>Short (Short=True) or full month name in Chrono.Locale.</summary>
       function  ToString(Short: Boolean): string; overload; inline;
       function  ToString(Short: Boolean; const FormatSettings: TFormatSettings): string; overload; inline;
       /// <summary>Number of days in this month for the given year (accounts for leap-year February).</summary>
@@ -558,9 +634,10 @@ type
       class operator Subtract(const a, b: TMonth): Integer; inline;
       class operator Subtract(const a: TMonth; const b: Word): TMonth; inline;
       class operator Implicit(const a: Word): TMonth; inline;
-      class operator Implicit(const a: TMonth): Word; inline;
-      class operator Implicit(const a: TMonth): TMonthNum; inline;
-      class operator Explicit(const a: string): TMonth; inline;
+      class operator Explicit(const a: TMonth): Word; inline;
+      class operator Explicit(const a: TMonth): TMonthNum; inline;
+      /// <summary>Parses a full, genitive or short month name of Chrono.Locale, case-insensitively.</summary>
+      class operator Explicit(const a: string): TMonth;
       class operator Explicit(const a: TMonth): string; inline;
       class operator Equal(const a, b: TMonth) : Boolean; inline;
       class operator NotEqual(const a, b: TMonth) : Boolean; inline;
@@ -590,7 +667,8 @@ type
     /// <summary>
     ///  A "year + month" pair with increment/decrement across year boundaries
     ///  (December 2024 + 1 = January 2025). See also <see cref="TQuarterOfYear"/> —
-    ///  the same idea for quarters.
+    ///  the same idea for quarters. A result outside the years 1..9999 raises
+    ///  EConvertError. Converting to a plain TMonth drops the year, so it is explicit.
     /// </summary>
     TMonthOfYear = record
     private
@@ -635,8 +713,8 @@ type
       property  Month: TMonth read FMonth write SetMonth;
       property  Days: TDays read GetDays;
     public
-      class operator Implicit(const a: TMonthOfYear): TMonth; inline;
-      class operator Implicit(const a: TMonthOfYear): TMonthNum; inline;
+      class operator Explicit(const a: TMonthOfYear): TMonth; inline;
+      class operator Explicit(const a: TMonthOfYear): TMonthNum; inline;
       class operator Explicit(const a: System.TDateTime): TMonthOfYear; inline;
       class operator Add(const a: TMonthOfYear; b: Word): TMonthOfYear; inline;
       class operator Subtract(const a, b: TMonthOfYear): Integer; inline;
@@ -651,6 +729,11 @@ type
       class operator LessThanOrEqual(const a, b: TMonthOfYear) : Boolean; inline;
     end;
 
+    /// <summary>
+    ///  A day of a month without a year, such as a birthday; February 29 is allowed.
+    ///  Setting Day raises EConvertError if the day does not exist in the month
+    ///  (in a leap year); setting Month clamps the day to the length of the month.
+    /// </summary>
     TDayOfMonth = record
     private
       FMonth: TMonth;
@@ -703,10 +786,17 @@ type
     private
       // Internal "date stamp" — day number in the proleptic Gregorian calendar,
       // the same scale as TTimeStamp.Date. IMPORTANT: FDate = 1 is 0001-01-01
-      // (see Encode(1,1,1)). FDate = 0 is a special case, see the comment in Decode.
+      // (see Encode(1,1,1)) and the largest valid value is 3652059 (9999-12-31).
+      // FDate = 0 is TDate.Zero, a special case, see the comment in Decode.
       FDate: Integer;
+      // Encodes components that are already known to be valid.
+      procedure EncodeValid(const Year, Month, Day: Integer); inline;
+      // A date from a stamp, raising EConvertError outside 0001-01-01..9999-12-31.
+      class function FromStamp(const Stamp: Int64): Chrono.TDate; static; inline;
+      // The date part of a System.TDateTime, range-checked.
+      class function FromDateTime(const Value: System.TDateTime): Chrono.TDate; static; inline;
       function  GetDay: TDay; inline;
-      function  GetISO: string; inline;
+      function  GetISO: string;
       function  GetMonth: TMonth; inline;
       function  GetWeekday: TWeekday; inline;
       function  GetQuarter: TQuarter; inline;
@@ -723,11 +813,16 @@ type
       procedure SetDayOfYear(const Value: TDayOfYear);
       function  GetDayOfMonth: TDayOfMonth;
     public
-      /// <summary>The date in the default format (ShortDateFormat of the global FormatSettings).</summary>
-      function  ToString: string; overload; inline;
+      /// <summary>The date in the default format (ShortDateFormat of the global FormatSettings) with the names of Chrono.Locale.</summary>
+      function  ToString: string; overload;
       function  ToString(const FormatSettings: TFormatSettings): string; overload; inline;
-      /// <summary>The date formatted with the Format mask (see FormatDateTime).</summary>
-      function  Format(const Format: string): string; overload; inline;
+      /// <summary>
+      ///  The date formatted with the Format mask (see FormatDateTime) and the month and
+      ///  weekday names of Chrono.Locale; a full month name next to a day number is genitive
+      ///  ("d mmmm" gives "27 октября"), see TLocale.Apply.
+      /// </summary>
+      function  Format(const Format: string): string; overload;
+      /// <summary>The date formatted with the Format mask and the names of FormatSettings as they are.</summary>
       function  Format(const Format: string; const FormatSettings: TFormatSettings): string; overload; inline;
       /// <summary>Parses a string as a date; raises EConvertError on failure.</summary>
       procedure Parse(const Value: string); overload; inline;
@@ -745,7 +840,7 @@ type
       function  WithYear(const Value: TYear): Chrono.TDate; inline;
       /// <summary>A new date with the month replaced (the day is clamped to the last day of the month if needed).</summary>
       function  WithMonth(const Value: TMonth): Chrono.TDate; inline;
-      /// <summary>A new date with the day of month replaced (not clamped — pass a valid day).</summary>
+      /// <summary>A new date with the day of month replaced; raises EConvertError if the day does not exist in that month.</summary>
       function  WithDay(const Value: TDay): Chrono.TDate; inline;
       /// <summary>The nearest given weekday on or after this date (the date itself if it already matches).</summary>
       function  NextWeekday(const Day: Chrono.TWeekday): Chrono.TDate;
@@ -758,27 +853,30 @@ type
       /// <summary>Subtracts a calendar period and returns a new date.</summary>
       function  Minus(const Period: Chrono.TPeriod): Chrono.TDate; overload; inline;
       function  Minus(const Days: Integer): Chrono.TDate; overload; inline;
-      /// <summary>Sets the full date (year/month/day). Uses the YMDDate table for 1970..2100 and a formula otherwise.
-      /// Components are not validated: within the table range an impossible date (e.g. February 30) yields <c>TDate.Zero</c>.</summary>
-      procedure Encode(const Year, Month, Day: Word); overload; inline;
+      /// <summary>Sets the full date (year/month/day).
+      /// Raises EConvertError if the components do not form a date in 0001-01-01..9999-12-31 (see <see cref="IsValid"/>).</summary>
+      procedure Encode(const Year, Month, Day: Integer); overload; inline;
       /// <summary>Sets the first day of the given month and year.</summary>
-      procedure Encode(const Year, Month: Word); overload; inline;
+      procedure Encode(const Year, Month: Integer); overload; inline;
       /// <summary>Sets the first day (January 1) of the given year.</summary>
-      procedure Encode(const Year: Word); overload; inline;
+      procedure Encode(const Year: Integer); overload; inline;
       procedure Encode(const Year: TYear; const Month: TMonth; const Day: TDay); overload; inline;
-      /// <summary>Splits the date into year/month/day. Uses the DateYMD table for 1970..2100 and cycle arithmetic otherwise.</summary>
+      /// <summary>Splits the date into year/month/day.</summary>
       procedure Decode(var Year, Month, Day: Word); overload;
       procedure Decode(var Year, Month: Word); overload; inline;
       procedure Decode(var Year: Word); overload; inline;
       procedure Decode(var Year: TYear; var Month: TMonth; var Day: TDay); overload; inline;
+      /// <summary>Day of the month. Assigning a day that does not exist in the month raises EConvertError.</summary>
       property  Day: TDay read GetDay write SetDay;
       property  DayOfMonth: TDayOfMonth read GetDayOfMonth;
+      /// <summary>Day of the year. Assigning 366 in a non-leap year raises EConvertError.</summary>
       property  DayOfYear: TDayOfYear read GetDayOfYear write SetDayOfYear;
+      /// <summary>Month. Assigning clamps the day to the length of the new month (January 31 -> February 29/28).</summary>
       property  Month: TMonth read GetMonth write SetMonth;
       property  Quarter: TQuarter read GetQuarter;
       property  Year: TYear read GetYear write SetYear;
       /// <summary>Day of the week of this date (fixed numbering Sun=1..Sat=7, see <see cref="TWeekday"/>).
-      /// Assigning moves the date within the same Sunday-based week.</summary>
+      /// Assigning moves the date within its week, which starts on Chrono.FirstDayOfWeek (as for StartOfWeek).</summary>
       property  Weekday: TWeekday read GetWeekday write SetWeekday;
       property  MonthOfYear: TMonthOfYear read GetMonthOfYear write SetMonthOfYear;
       property  QuarterOfYear: TQuarterOfYear read GetQuarterOfYear;
@@ -787,26 +885,50 @@ type
     public
       constructor Create(const Date: Chrono.TDate); overload;
       constructor Create(const Date: System.TDateTime); overload;
+      /// <summary>Creates a date from its components; raises EConvertError if they do not form a valid date.</summary>
       constructor Create(const Year: TYear; const Month: TMonth; const Day: TDay); overload;
-      constructor Create(const Year, Month, Day: Word); overload;
+      constructor Create(const Year, Month, Day: Integer); overload;
+      /// <summary>True if the components form a date in 0001-01-01..9999-12-31.</summary>
+      class function IsValid(const Year, Month, Day: Integer): Boolean; static; inline;
+      /// <summary>Creates a date without raising: returns False (and TDate.Zero) for invalid components.</summary>
+      class function TryCreate(const Year, Month, Day: Integer; out Date: Chrono.TDate): Boolean; static;
       /// <summary>The current system date (without time).</summary>
       class function Today: Chrono.TDate; overload; static;
+      /// <summary>The value of an uninitialized TDate (stamp 0); not a real date, it decodes as 0000-12-31.</summary>
+      class function Zero: Chrono.TDate; static; inline;
       /// <summary>An array of all dates from First to Last inclusive (materialized; prefer Sequence for large ranges).</summary>
       class function Range(const First, Last: Chrono.TDate): TArray<Chrono.TDate>; static;
       /// <summary>A lazy (not materialized) sequence of dates from First to Last inclusive — preferred for large ranges.</summary>
       class function Sequence(const First, Last: Chrono.TDate): TSequence; static;
     public
+      // Day arithmetic and every conversion into TDate raise EConvertError when
+      // the result is outside 0001-01-01..9999-12-31.
+      //
+      // TDate converts implicitly to System.TDateTime and TTimeStamp, which lose
+      // nothing. The opposite conversions drop the time of day, so they are
+      // explicit: Chrono.TDate(SomeDateTime). Chrono.TDate(Integer) takes a raw
+      // stamp (TTimeStamp.Date scale); 0 gives TDate.Zero.
+      //
+      // The operator to Variant loses nothing but is explicit, Variant(Date): the
+      // compiler continues an implicit conversion to Variant with the built-in
+      // Variant -> Integer/string ones, so with an implicit operator D1 + D2 would
+      // compile as D1 + <the day number of D2> and Count := Date would give the
+      // System.TDateTime serial number (and, on TTime and TDateTime, D1 + Time and
+      // D1 + DateTime would compile). V := Date compiles all the same: it goes
+      // through System.TDateTime, gives the same varDate value, and the compiler
+      // does not continue that path any further. Tests/CompileFail.dpr of the
+      // Chrono repository checks both.
       class operator Add(const a: Chrono.TDate; const b: Integer): Chrono.TDate; inline;
       class operator Subtract(const a: Chrono.TDate; const b: Integer): Chrono.TDate; inline;
       class operator Subtract(const a, b: Chrono.TDate): Integer; inline;
       class operator Add(const A: Chrono.TDate; const B: Chrono.TPeriod): Chrono.TDate; inline;
       class operator Subtract(const A: Chrono.TDate; const B: Chrono.TPeriod): Chrono.TDate; inline;
-      class operator Implicit(const a: System.TDateTime): Chrono.TDate; inline;
+      class operator Explicit(const a: System.TDateTime): Chrono.TDate; inline;
       class operator Implicit(const a: Chrono.TDate): System.TDateTime; inline;
-      class operator Implicit(const a: TTimeStamp): Chrono.TDate; inline;
+      class operator Explicit(const a: TTimeStamp): Chrono.TDate; inline;
       class operator Implicit(const a: Chrono.TDate): TTimeStamp; inline;
-      class operator Implicit(const a: Variant): Chrono.TDate; inline;
-      class operator Implicit(const a: Chrono.TDate): Variant; inline;
+      class operator Explicit(const a: Variant): Chrono.TDate; inline;
+      class operator Explicit(const a: Chrono.TDate): Variant; inline;
       class operator Explicit(const a: Integer): Chrono.TDate; inline;
       class operator Explicit(const a: Chrono.TDate): Integer; inline;
       class operator Explicit(const a: Chrono.TDate): string; inline;
@@ -835,23 +957,30 @@ type
     ///  The internal <c>FTime</c> value is an integer number of milliseconds since
     ///  midnight (0..86399999), the same scale as TTimeStamp.Time. This differs from
     ///  System.TDateTime, where time is the fractional part of a day count (Double) —
-    ///  see the Implicit operators for conversions between the two. Arithmetic
-    ///  operators do NOT wrap around midnight; use TDateTime + TDuration for that.
+    ///  see the conversion operators below. Components are validated (EConvertError
+    ///  for 24:00, 12:60 and the like), and arithmetic wraps around midnight:
+    ///  23:00 + 2 hours = 01:00. Use TDateTime + TDuration when the date must change too.
     /// </remarks>
     TTime = record
     private
       FTime: Integer;
+      // Wraps any number of milliseconds into a time of day.
+      class function Wrap(const MSecs: Int64): Chrono.TTime; static; inline;
+      // A time from milliseconds since midnight, raising EConvertError outside 0..86399999.
+      class function FromMSecs(const MSecs: Int64): Chrono.TTime; static; inline;
+      // The time part of a System.TDateTime.
+      class function FromDateTime(const Value: System.TDateTime): Chrono.TTime; static; inline;
       function  GetISO: string; inline;
       procedure SetISO(const Value: string);
-      function  GetMIME: string; inline;
+      function  GetMIME: string;
       procedure SetMIME(const Value: string);
       function  GetHour: Word; inline;
       function  GetMinute: Word; inline;
-      function  GetMSecond: Word; inline;
+      function  GetMillisecond: Word; inline;
       function  GetSecond: Word; inline;
       procedure SetHour(const Value: Word); inline;
       procedure SetMinute(const Value: Word); inline;
-      procedure SetMSecond(const Value: Word); inline;
+      procedure SetMillisecond(const Value: Word); inline;
       procedure SetSecond(const Value: Word); inline;
     public
       function  ToString: string; overload; inline;
@@ -862,48 +991,66 @@ type
       procedure Parse(const Value: string; const FormatSettings: TFormatSettings); overload; inline;
       function  TryParse(const Value: string): Boolean; overload; inline;
       function  TryParse(const Value: string; const FormatSettings: TFormatSettings): Boolean; overload; inline;
-      procedure Encode(Hour, Min, Sec: Word; MSec: Word = 0); inline;
+      /// <summary>Sets the time from its components; raises EConvertError outside 00:00:00.000..23:59:59.999.</summary>
+      procedure Encode(const Hour, Minute, Second: Integer; const MSec: Integer = 0); inline;
       procedure Decode(var Hour, Min, Sec, MSec: Word); overload;
       procedure Decode(var Hour, Min, Sec: Word); overload;
       /// <summary>The time in ISO 8601 format (HH:MM:SS).</summary>
       property  ISO: string read GetISO write SetISO;
       /// <summary>
-      ///  Reading returns a compact form without separators (HHMMSS).
-      ///  Writing accepts "HH[:MM[:SS]][ AM|PM]" — note that the two directions use
-      ///  different formats, so the value read back cannot be assigned again as is.
+      ///  The RFC 5322 (e-mail) time of day: reading returns "HH:MM:SS"; writing
+      ///  also accepts "HH[:MM[:SS]][ AM|PM]".
       /// </summary>
       property  MIME: string read GetMIME write SetMIME;
       property  Hour: Word read GetHour write SetHour;
       property  Minute: Word read GetMinute write SetMinute;
       property  Second: Word read GetSecond write SetSecond;
-      property  MSecond: Word read GetMSecond write SetMSecond;
+      property  Millisecond: Word read GetMillisecond write SetMillisecond;
     public
       constructor Create(const Time: Chrono.TTime); overload;
       constructor Create(const Time: System.TDateTime); overload;
-      constructor Create(Hour, Min, Sec: Word; MSec: Word = 0); overload;
+      /// <summary>Creates a time from its components; raises EConvertError outside 00:00:00.000..23:59:59.999.</summary>
+      constructor Create(const Hour, Minute, Second: Integer; const MSec: Integer = 0); overload;
+      /// <summary>True if the components form a time in 00:00:00.000..23:59:59.999.</summary>
+      class function IsValid(const Hour, Minute, Second: Integer; const MSec: Integer = 0): Boolean; static; inline;
+      /// <summary>Creates a time without raising: returns False (and TTime.Zero) for invalid components.</summary>
+      class function TryCreate(const Hour, Minute, Second: Integer; out Time: Chrono.TTime): Boolean; overload; static;
+      class function TryCreate(const Hour, Minute, Second, MSec: Integer; out Time: Chrono.TTime): Boolean; overload; static;
       /// <summary>The current system time (time of day only, without the date).</summary>
       class function Now: Chrono.TTime; static;
+      /// <summary>Midnight, 00:00:00.000 (the value of an uninitialized TTime).</summary>
+      class function Zero: Chrono.TTime; static; inline;
     public
       // Add/Subtract with THours/TMinutes/TSeconds are "named units" for readable
-      // arithmetic (Time + THours(2) instead of magic millisecond numbers).
+      // arithmetic (Time + THours(2) instead of magic millisecond numbers); a plain
+      // Integer means milliseconds. All of them, and Inc/Dec, wrap around midnight.
+      // Subtracting two times gives the signed TDuration between them (no wrapping).
+      // There is deliberately no TTime + TTime: adding two times of day has no
+      // meaning — add a TDuration (or named units) to a time instead.
       // Comparison operators with the same types (the 'Hours' block etc. below)
       // allow writing `if SomeTime > THours(8) then` without manual conversion.
+      //
+      // TTime converts implicitly to System.TDateTime and TTimeStamp. The
+      // opposite conversions drop the date, so they are explicit:
+      // Chrono.TTime(SomeDateTime). The operator to Variant is explicit for the
+      // reason given at TDate's operators.
       class operator Add(const L: Chrono.TTime; R: Integer): Chrono.TTime; inline;
-      class operator Add(const L, R: Chrono.TTime): Chrono.TTime; inline;
       class operator Add(const L: Chrono.TTime; R: THours): Chrono.TTime; inline;
       class operator Add(const L: Chrono.TTime; R: TMinutes): Chrono.TTime; inline;
       class operator Add(const L: Chrono.TTime; R: TSeconds): Chrono.TTime; inline;
+      class operator Add(const L: Chrono.TTime; const R: Chrono.TDuration): Chrono.TTime; inline;
       class operator Subtract(const L: Chrono.TTime; R: Integer): Chrono.TTime; inline;
       class operator Subtract(const L, R: Chrono.TTime): TDuration; inline;
       class operator Subtract(const L: Chrono.TTime; R: THours): Chrono.TTime; inline;
       class operator Subtract(const L: Chrono.TTime; R: TMinutes): Chrono.TTime; inline;
       class operator Subtract(const L: Chrono.TTime; R: TSeconds): Chrono.TTime; inline;
-      class operator Implicit(const a: System.TDateTime): Chrono.TTime; inline;
+      class operator Subtract(const L: Chrono.TTime; const R: Chrono.TDuration): Chrono.TTime; inline;
+      class operator Explicit(const a: System.TDateTime): Chrono.TTime; inline;
       class operator Implicit(const a: Chrono.TTime): System.TDateTime; inline;
-      class operator Implicit(const a: TTimeStamp): Chrono.TTime; inline;
+      class operator Explicit(const a: TTimeStamp): Chrono.TTime; inline;
       class operator Implicit(const a: Chrono.TTime): TTimeStamp; inline;
-      class operator Implicit(const a: Variant): Chrono.TTime; inline;
-      class operator Implicit(const a: Chrono.TTime): Variant; inline;
+      class operator Explicit(const a: Variant): Chrono.TTime; inline;
+      class operator Explicit(const a: Chrono.TTime): Variant; inline;
       class operator Explicit(const a: Integer): Chrono.TTime; inline;
       class operator Explicit(const a: Chrono.TTime): Integer; inline;
       class operator Explicit(const a: Chrono.TTime): string; inline;
@@ -993,9 +1140,11 @@ type
       procedure SetDate(const Value: Chrono.TDate); inline;
       procedure SetTime(const Value: Chrono.TTime); inline;
     public
-      function  ToString: string; overload; inline;
+      /// <summary>Date and time in the default format with the names of Chrono.Locale, as TDate.ToString.</summary>
+      function  ToString: string; overload;
       function  ToString(const FormatSettings: TFormatSettings): string; overload; inline;
-      function  Format(const Format: string): string; overload; inline;
+      /// <summary>Formatted with the names of Chrono.Locale, as TDate.Format.</summary>
+      function  Format(const Format: string): string; overload;
       function  Format(const Format: string; const FormatSettings: TFormatSettings): string; overload; inline;
       procedure Parse(const Value: string); overload; inline;
       procedure Parse(const Value: string; const FormatSettings: TFormatSettings); overload; inline;
@@ -1018,10 +1167,14 @@ type
     public
       constructor Create(const Value: Chrono.TDateTime); overload;
       constructor Create(const Date: Chrono.TDate; const Time: Chrono.TTime); overload;
+      /// <summary>Midnight (00:00:00.000) of the given date, the same as Chrono.TDateTime(Date).</summary>
       constructor Create(const Value: Chrono.TDate); overload;
+      /// <summary>The given time of day on today's date (reads the system clock).</summary>
       constructor Create(const Value: Chrono.TTime); overload;
       constructor Create(const Value: System.TDateTime); overload;
       class function Now: Chrono.TDateTime; static;
+      /// <summary>TDate.Zero with TTime.Zero (the value of an uninitialized TDateTime).</summary>
+      class function Zero: Chrono.TDateTime; static; inline;
     public
       class operator Add(const A: Chrono.TDateTime; const B: Chrono.TDuration): Chrono.TDateTime; inline;
       class operator Subtract(const A: Chrono.TDateTime; const B: Chrono.TDuration): Chrono.TDateTime; inline;
@@ -1040,7 +1193,7 @@ type
       // Chrono.TDateTime — the direct one via Implicit(System.TDateTime) and an
       // indirect one via Variant — and mixes them up. As a result the Date
       // component gets DateDelta added twice (see
-      // Chrono.TDate.Implicit(System.TDateTime)), as if the conversion were applied
+      // Chrono.TDate.FromDateTime), as if the conversion were applied
       // twice. This reproduces both for a plain Implicit(System.TDateTime) (while
       // Implicit(Variant) existed) and for an explicit Chrono.TDateTime(SomeVariant)
       // cast (while Explicit(Variant) existed) — so switching Implicit to Explicit
@@ -1049,7 +1202,10 @@ type
       // fixture in Tests/ChronoTypes.Tests.pas. To get a Chrono.TDateTime from a
       // Variant, convert explicitly through System.TDateTime:
       // Chrono.TDateTime(System.TDateTime(SomeVariant)).
-      class operator Implicit(const a: Chrono.TDateTime): Variant; inline;
+      //
+      // The operator to Variant is explicit for the reason given at TDate's
+      // operators.
+      class operator Explicit(const a: Chrono.TDateTime): Variant; inline;
       class operator Explicit(const a: Chrono.TDateTime): string; inline;
       class operator Explicit(const a: string): Chrono.TDateTime; inline;
       class operator Explicit(const a: Chrono.TDateTime): Chrono.TDate; inline;
@@ -1076,11 +1232,18 @@ type
     ///  UTC). Keep this in mind when comparing with the ISO "+HH:MM" notation.
     /// </remarks>
     TTimeZone = record
+    private type
+      TNamedZone = record
+        Code: string;
+        Bias: TTimeZoneBias;
+      end;
     private class var
-      /// <summary>Registry of named time zones (military letters A..Y, plus UT/UTC/GMT/Z), filled in the class constructor.</summary>
-      Timezones: TDictionary<string, TTimeZoneBias>;
+      /// <summary>Registry of named time zones (military letters A..Y, plus UT/UTC/GMT/Z), filled in the class constructor.
+      /// About thirty entries, so a linear search is enough.</summary>
+      Timezones: TArray<TNamedZone>;
       class constructor Create;
-      class destructor Destroy;
+      /// <summary>The index of a named zone in Timezones, or -1.</summary>
+      class function  IndexOf(const Code: string): Integer; static;
       /// <summary>Parses 2 digits of S starting at Index as a number (00..99). No bounds or digit checks — the caller must guarantee both.</summary>
       class function  SNum(const S: string; const Index: Integer): Integer; inline; static;
     private
@@ -1089,7 +1252,8 @@ type
     public
       /// <summary>The time zone of the current OS settings (takes daylight saving time into account).</summary>
       class function System: TTimeZone; static;
-      /// <summary>Registers or overrides a named time zone (a letter code or a name such as "UTC"/"GMT"/"Z"). Names are case-sensitive.</summary>
+      /// <summary>Registers or overrides a named time zone (a letter code or a name such as "UTC"/"GMT"/"Z"). Names are not case-sensitive, as in RFC 5322.
+      /// The registry is not guarded against concurrent changes: register zones at startup.</summary>
       class procedure Register(const Code: string; Bias: TTimeZoneBias); static;
       /// <summary>The offset in RFC 5322 (e-mail/MIME) form "+HHMM"/"-HHMM", without a colon.
       /// Use <c>string(TimeZone)</c> for the "+HH:MM" form.</summary>
@@ -1115,14 +1279,14 @@ type
 
     TDatePartHelper = record helper for TDatePart
     public
-      function GetName: string; inline;
-      function GetShortName: string; inline;
+      function GetName: string;
+      function GetShortName: string;
     end;
 
     TTimePartHelper = record helper for TTimePart
     public
-      function GetName: string; inline;
-      function GetShortName: string; inline;
+      function GetName: string;
+      function GetShortName: string;
     end;
 
     TDurationHelper = record helper for TDuration
@@ -1202,20 +1366,6 @@ type
       property  Last: Chrono.TDate read GetLast;
     end;
 
-    TDateHelper = record helper for Chrono.TDate
-    public const
-      Zero: Chrono.TDate = (FDate: 0);
-    end;
-
-    TTimeHelper = record helper for Chrono.TTime
-    public const
-      Zero: Chrono.TTime = (FTime: 0);
-    end;
-
-    TDateTimeHelper = record helper for Chrono.TDateTime
-    public const
-      Zero: Chrono.TDateTime = (FDate: (FDate: 0); FTime: (FTime: 0));
-    end;
 
   {$endregion}
 
@@ -1233,9 +1383,36 @@ type
     end;
 
     /// <summary>
+    ///  Dates, as TDate stamps (Integer(Date)), each with a Boolean. Used by
+    ///  TBasicCalendar; the methods are named like those of TDictionary. The
+    ///  entries are kept in one sorted array, so a lookup is a binary search over
+    ///  contiguous memory.
+    /// </summary>
+    TDateFlags = class
+    private type
+      TEntry = record
+        Key: Integer;
+        Value: Boolean;
+      end;
+    private
+      FEntries: TArray<TEntry>;
+      FCount: Integer;
+      // Binary search; when Key is absent, Index is where it would be inserted.
+      function  Find(const Key: Integer; out Index: Integer): Boolean;
+    public
+      /// <summary>The value for Key; False and Value = False if there is none.</summary>
+      function  TryGetValue(const Key: Integer; out Value: Boolean): Boolean;
+      procedure AddOrSetValue(const Key: Integer; const Value: Boolean);
+      function  ContainsKey(const Key: Integer): Boolean;
+      procedure Remove(const Key: Integer);
+      procedure Clear;
+      property  Count: Integer read FCount;
+    end;
+
+    /// <summary>
     ///  The basic "default" calendar: weekends are Saturday and Sunday
     ///  (see IsWeekEnd); holidays and explicit working-day overrides are kept in
-    ///  internal dictionaries and set through Holiday[] / WorkDay[].
+    ///  TDateFlags lists and set through Holiday[] / WorkDay[].
     /// </summary>
     /// <remarks>
     ///  IsWorkDay first checks for an explicit override in WorkDays (e.g. a
@@ -1245,15 +1422,15 @@ type
     /// </remarks>
     TBasicCalendar = class(TInterfacedObject, ICalendarProvider)
     private
-      FHolidays: TDictionary<Integer, Boolean>;
-      FWorkDays: TDictionary<Integer, Boolean>;
+      FHolidays: TDateFlags;
+      FWorkDays: TDateFlags;
       function  GetHoliday(const Date: Chrono.TDate): Boolean;
       procedure SetHoliday(const Date: Chrono.TDate; const Value: Boolean);
       function  GetWorkDay(const Date: Chrono.TDate): Boolean;
       procedure SetWorkDay(const Date: Chrono.TDate; const Value: Boolean);
     protected
-      property  Holidays: TDictionary<Integer, Boolean> read FHolidays;
-      property  WorkDays: TDictionary<Integer, Boolean> read FWorkDays;
+      property  Holidays: TDateFlags read FHolidays;
+      property  WorkDays: TDateFlags read FWorkDays;
     public
       constructor Create;
       destructor Destroy; override;
@@ -1266,11 +1443,49 @@ type
     end;
   {$endregion}
 
-  // Predefined constants for fast calculations
-  {$include Chrono.FastCalc.inc}
-  {$include Chrono.Leap.inc}
-  {$include Chrono.DateYMD.inc} //predefined for dates from 1970 to 2100 years
-  {$include Chrono.YMDDate.inc} //predefined for dates from 1970 to 2100 years
+  private const
+    // Private, but declared here rather than in the implementation section:
+    // inline methods use them, and an inline routine declared in the interface
+    // section must not refer to the implementation section (E2441).
+    MinYear = 1;
+    MaxYear = 9999;
+    MinDateStamp = 1;        // 0001-01-01
+    MaxDateStamp = 3652059;  // 9999-12-31
+    MSecsPerHour = MinsPerHour * SecsPerMin * MSecsPerSec;
+    MSecsPerMinute = SecsPerMin * MSecsPerSec;
+  private
+    // Validation helpers. The Checked* functions return a valid value or raise
+    // EConvertError through the Error* procedures, which are kept out of line so
+    // that the inlined checks stay small.
+    class procedure ErrorYear(const Value: Integer); static;
+    class procedure ErrorMonth(const Value: Integer); static;
+    class procedure ErrorDay(const Value: Integer); static;
+    class procedure ErrorQuarter(const Value: Integer); static;
+    class procedure ErrorWeekday(const Value: Integer); static;
+    class procedure ErrorDate(const Year, Month, Day: Integer); static;
+    class procedure ErrorDayOfYear(const Value, Year: Integer); static;
+    class procedure ErrorDateRange; static;
+    class procedure ErrorTime(const Hour, Minute, Second, MSec: Integer); static;
+    class procedure ErrorTimeRange(const MSecs: Int64); static;
+    class function  CheckedYear(const Value: Integer): Word; static; inline;
+    class function  CheckedMonth(const Value: Integer): Word; static; inline;
+    class function  CheckedDay(const Value: Integer): Word; static; inline;
+    class function  CheckedQuarter(const Value: Integer): Word; static; inline;
+    class function  CheckedWeekday(const Value: Integer): Word; static; inline;
+    // Calendar arithmetic. There are no lookup tables: a table lookup is fast
+    // only while the table stays in the CPU cache, and date code usually runs
+    // between other work that pushes it out.
+    class function  IsLeapYear(const Year: Integer): Boolean; static; inline;
+    class function  DaysInMonth(const Year, Month: Integer): Integer; static; inline;
+    // The weekday at a position (1..7) of a week that starts on FirstDayOfWeek,
+    // and the position of a weekday in such a week.
+    class function  WeekdayAt(const FirstDayOfWeek, Index: Integer): Word; static; inline;
+    class function  WeekdayIndex(const FirstDayOfWeek, Day: Integer): Word; static; inline;
+
+  private class var
+    FLocale: TLocale;
+  private
+    class procedure SetLocale(const Value: TLocale); static;
 
   public class var
     /// <summary>
@@ -1282,14 +1497,19 @@ type
     /// <remarks>
     ///  IMPORTANT: do not rely on the zero default of this field — without
     ///  explicit initialization FDay=0 is outside TWeekdayNum (1..7) and would
-    ///  index past the internal WeekdaysArray/DaysOfWeekArray tables. The unit's
-    ///  initialization section always sets it — see below.
+    ///  break every week-related calculation. The unit's initialization section
+    ///  always sets it — see below.
     /// </remarks>
     FirstDayOfWeek: Chrono.TWeekday;
 
   public
+    /// <summary>
+    ///  The locale of the methods without a FormatSettings parameter: month and weekday
+    ///  names, names of date and time parts, error messages. TLocale.System until the
+    ///  program assigns another one; nil restores TLocale.System.
+    /// </summary>
+    class property Locale: TLocale read FLocale write SetLocale;
     class function Today: Chrono.TDate; inline; static;
-    class function Date: Chrono.TDate; inline; static;
     class function Time: Chrono.TTime; inline; static;
     class function Now: Chrono.TDateTime; inline; static;
     class function Weekday(const Day: TWeekdayNum; const FirstDayOfWeek: TWeekday): TWeekday; overload; static;
@@ -1298,10 +1518,77 @@ end;
 
   TChronoDate = Chrono.TDate;
 
-const
-  MSecsPerHour = MinsPerHour * SecsPerMin * MSecsPerSec;
-  MSecsPerMinute = SecsPerMin * MSecsPerSec;
+/// <summary>The default calendar: a TBasicCalendar until replaced via SetDefaultCalendar.</summary>
+function DefaultCalendar: Chrono.ICalendarProvider;
+/// <summary>Replaces the default calendar; nil restores a fresh TBasicCalendar.</summary>
+procedure SetDefaultCalendar(const Value: Chrono.ICalendarProvider);
 
+implementation
+
+const
+  // Texts of a TLocale, in the order of its keys: full, genitive and short month names;
+  // full and short weekday names, from Sunday as in LongDayNames; full and short names of
+  // the date parts and of the time parts; error messages.
+  MonthTextIndex         = 0;
+  GenitiveTextIndex      = 12;
+  ShortMonthTextIndex    = 24;
+  DayTextIndex           = 36;
+  ShortDayTextIndex      = 43;
+  DatePartTextIndex      = 50;
+  ShortDatePartTextIndex = 55;
+  TimePartTextIndex      = 60;
+  ShortTimePartTextIndex = 64;
+  ErrorTextIndex         = 68;
+  TextCount              = 82;
+
+  MonthKeys: array[Chrono.TMonthNum] of string = (
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'
+  );
+  DayKeys: array[Chrono.TWeekdayNum] of string = (
+    'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'
+  );
+  DatePartKeys: array[Chrono.TDatePart] of string = ('year', 'quarter', 'month', 'week', 'day');
+  TimePartKeys: array[Chrono.TTimePart] of string = ('hour', 'minute', 'second', 'millisecond');
+  ErrorKeys: array[Chrono.TLocale.TError] of string = (
+    'invalid-time-zone', 'invalid-quarter', 'invalid-month-name', 'invalid-weekday-name',
+    'invalid-year', 'invalid-month', 'invalid-day', 'invalid-quarter-number', 'invalid-weekday',
+    'invalid-date', 'invalid-day-of-year', 'date-range', 'invalid-time', 'time-range'
+  );
+
+  EnglishMonths: array[Chrono.TMonthNum] of string = (
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  );
+  EnglishShortMonths: array[Chrono.TMonthNum] of string = (
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  );
+  EnglishDays: array[Chrono.TWeekdayNum] of string = (
+    'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
+  );
+  EnglishShortDays: array[Chrono.TWeekdayNum] of string = ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
+  EnglishDateParts: array[Chrono.TDatePart] of string = ('Year', 'Quarter', 'Month', 'Week', 'Day');
+  EnglishShortDateParts: array[Chrono.TDatePart] of string = ('y', 'q', 'm', 'w', 'd');
+  EnglishTimeParts: array[Chrono.TTimePart] of string = ('Hour', 'Minute', 'Second', 'Millisecond');
+  EnglishShortTimeParts: array[Chrono.TTimePart] of string = ('h', 'm', 's', 'ms');
+  EnglishErrors: array[Chrono.TLocale.TError] of string = (
+    'Invalid time zone "%s"',
+    'Invalid quarter format "%s"',
+    'Invalid month name "%s"',
+    'Invalid day of week name "%s"',
+    'Invalid year %d (the valid range is %d..%d)',
+    'Invalid month %d (the valid range is 1..12)',
+    'Invalid day of month %d (the valid range is 1..31)',
+    'Invalid quarter %d (the valid range is 1..4)',
+    'Invalid day of week %d (the valid range is 1..7)',
+    'Invalid date: year %d, month %d, day %d',
+    'Invalid day of year %d in year %d',
+    'Date is outside the range 0001-01-01..9999-12-31',
+    'Invalid time: hour %d, minute %d, second %d, millisecond %d',
+    'Time of day %d ms is outside the range 00:00:00.000..23:59:59.999'
+  );
+
+const
   S24: array[0..24] of string = (
     '00', '01', '02', '03', '04', '05', '06', '07', '08', '09',
     '10', '11', '12', '13', '14', '15', '16', '17', '18', '19',
@@ -1318,9 +1605,6 @@ const
     '60'
   );
 
-  MIMEWeekdays: array[1..7] of string = ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
-  MIMEMonths:   array[1..12] of string = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
-
   ISO8601DateFormatSettings: TFormatSettings = (
     DateSeparator: '-';
     TimeSeparator: ':';
@@ -1331,83 +1615,6 @@ const
     ThousandSeparator: #0;
     DecimalSeparator: '.'
   );
-
-/// <summary>The default calendar: a TBasicCalendar until replaced via SetDefaultCalendar.</summary>
-function DefaultCalendar: Chrono.ICalendarProvider;
-/// <summary>Replaces the default calendar; nil restores a fresh TBasicCalendar.</summary>
-procedure SetDefaultCalendar(const Value: Chrono.ICalendarProvider);
-
-const
-  FMSecsPerDay: Single  = MSecsPerDay;
-  IMSecsPerDay: Integer = MSecsPerDay;
-
-procedure Localize;
-
-type
-  TLocalizeState = (Idle = 0, Initializing = 1, Done = 2);
-
-var
-  gLocalizeState: Integer = Ord(TLocalizeState.Idle);
-  gLocalizedDatePart:      array[Chrono.TDatePart] of string;
-  gLocalizedDatePartShort: array[Chrono.TDatePart] of string;
-  gLocalizedTimePart:      array[Chrono.TTimePart] of string;
-  gLocalizedTimePartShort: array[Chrono.TTimePart] of string;
-
-resourcestring
-  SInvalidTimeZone = 'Invalid time zone "%s"';
-  SInvalidQuarter  = 'Invalid quarter format "%s"';
-
-resourcestring
-  SYear_ru         = 'Год';
-  SQuarter_ru      = 'Квартал';
-  SMonth_ru        = 'Месяц';
-  SWeek_ru         = 'Неделя';
-  SDay_ru          = 'День';
-  SHour_ru         = 'Час';
-  SMinute_ru       = 'Минут';
-  SSecond_ru       = 'Секунд';
-  SMillis_ru       = 'Миллисекунд';
-  SMicros_ru       = 'Микросекунд';
-  SNanos_ru        = 'Наносекунд';
-  SYearShort_ru    = 'г';
-  SQuarterShort_ru = 'кв';
-  SMonthShort_ru   = 'мес';
-  SWeekShort_ru    = 'нед';
-  SDayShort_ru     = 'д';
-  SHourShort_ru    = 'ч';
-  SMinuteShort_ru  = 'м';
-  SSecondShort_ru  = 'с';
-  SMillisShort_ru  = 'мс';
-  SMicrosShort_ru  = 'мкс';
-  SNanosShort_ru   = 'нс';
-
-  SYear            = 'Year';
-  SQuarter         = 'Quarter';
-  SMonth           = 'Month';
-  SWeek            = 'Week';
-  SDay             = 'Day';
-  SHour            = 'Hour';
-  SMinute          = 'Minute';
-  SSecond          = 'Second';
-  SMillis          = 'Milliseconds';
-  SMicros          = 'Microseconds';
-  SNanos           = 'Nanoseconds';
-  SYearShort       = 'y';
-  SQuarterShort    = 'q';
-  SMonthShort      = 'm';
-  SWeekShort       = 'w';
-  SDayShort        = 'd';
-  SHourShort       = 'h';
-  SMinuteShort     = 'm';
-  SSecondShort     = 's';
-  SMillisShort     = 'ms';
-  SMicrosShort     = 'mcs';
-  SNanosShort      = 'ns';
-
-implementation
-
-uses
-  System.SysConst, System.Math, System.Classes, System.SyncObjs;
 
 var
   gDefaultCalendar: Chrono.ICalendarProvider;
@@ -1425,12 +1632,137 @@ begin
     gDefaultCalendar := Value;
 end;
 
-class function Chrono.Today: Chrono.TDate;
+{ Chrono validation helpers }
+
+class procedure Chrono.ErrorYear(const Value: Integer);
 begin
-  Result := Chrono.TDate.Today;
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidYear), [Value, MinYear, MaxYear]);
 end;
 
-class function Chrono.Date: Chrono.TDate;
+class procedure Chrono.ErrorMonth(const Value: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidMonth), [Value]);
+end;
+
+class procedure Chrono.ErrorDay(const Value: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidDay), [Value]);
+end;
+
+class procedure Chrono.ErrorQuarter(const Value: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidQuarterNumber), [Value]);
+end;
+
+class procedure Chrono.ErrorWeekday(const Value: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidWeekday), [Value]);
+end;
+
+class procedure Chrono.ErrorDate(const Year, Month, Day: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidDate), [Year, Month, Day]);
+end;
+
+class procedure Chrono.ErrorDayOfYear(const Value, Year: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidDayOfYear), [Value, Year]);
+end;
+
+class procedure Chrono.ErrorDateRange;
+begin
+  raise EConvertError.Create(FLocale.ErrorText(TLocale.TError.DateRange));
+end;
+
+class procedure Chrono.ErrorTime(const Hour, Minute, Second, MSec: Integer);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.InvalidTime), [Hour, Minute, Second, MSec]);
+end;
+
+class procedure Chrono.ErrorTimeRange(const MSecs: Int64);
+begin
+  raise EConvertError.CreateFmt(FLocale.ErrorText(TLocale.TError.TimeRange), [MSecs]);
+end;
+
+class procedure Chrono.SetLocale(const Value: TLocale);
+begin
+  if Value <> nil then
+    FLocale := Value
+  else
+    FLocale := TLocale.FSystem;
+end;
+
+class function Chrono.CheckedYear(const Value: Integer): Word;
+begin
+  if (Value < MinYear) or (Value > MaxYear) then
+    ErrorYear(Value);
+  Result := Value;
+end;
+
+class function Chrono.CheckedMonth(const Value: Integer): Word;
+begin
+  if (Value < 1) or (Value > 12) then
+    ErrorMonth(Value);
+  Result := Value;
+end;
+
+class function Chrono.CheckedDay(const Value: Integer): Word;
+begin
+  if (Value < 1) or (Value > 31) then
+    ErrorDay(Value);
+  Result := Value;
+end;
+
+class function Chrono.CheckedQuarter(const Value: Integer): Word;
+begin
+  if (Value < 1) or (Value > 4) then
+    ErrorQuarter(Value);
+  Result := Value;
+end;
+
+class function Chrono.CheckedWeekday(const Value: Integer): Word;
+begin
+  if (Value < 1) or (Value > 7) then
+    ErrorWeekday(Value);
+  Result := Value;
+end;
+
+{ Chrono calendar arithmetic }
+
+// The multiplication below wraps around on purpose, so overflow checks are off
+// for this function only (the switch also holds where it is inlined); the rest
+// of the unit works under {$Q+} and {$R+}.
+{$IFOPT Q+}{$DEFINE CHRONO_OVERFLOWCHECKS}{$Q-}{$ENDIF}
+class function Chrono.IsLeapYear(const Year: Integer): Boolean;
+begin
+  // A year that is not a multiple of 25 is a leap year when it is a multiple of
+  // 4; a multiple of 25 is one when it is a multiple of 16 (and so of 400).
+  // Y is a multiple of 25 exactly when Y * $C28F5C29 (the inverse of 25 modulo
+  // 2^32) wraps to at most (2^32 - 1) div 25: one multiplication, no division.
+  // Written without branches: random years would make them unpredictable.
+  Result := Year and (3 or 12 * Ord(Cardinal(Year) * $C28F5C29 <= $0A3D70A3)) = 0;
+end;
+{$IFDEF CHRONO_OVERFLOWCHECKS}{$Q+}{$UNDEF CHRONO_OVERFLOWCHECKS}{$ENDIF}
+
+class function Chrono.DaysInMonth(const Year, Month: Integer): Integer;
+begin
+  if Month = 2 then
+    Result := 28 + Ord(IsLeapYear(Year))
+  else
+    Result := 30 + ((Month xor (Month shr 3)) and 1); // 31 for months 1, 3, 5, 7, 8, 10, 12
+end;
+
+class function Chrono.WeekdayAt(const FirstDayOfWeek, Index: Integer): Word;
+begin
+  Result := (FirstDayOfWeek + Index - 2) mod 7 + 1;
+end;
+
+class function Chrono.WeekdayIndex(const FirstDayOfWeek, Day: Integer): Word;
+begin
+  Result := (Day - FirstDayOfWeek + 7) mod 7 + 1;
+end;
+
+class function Chrono.Today: Chrono.TDate;
 begin
   Result := Chrono.TDate.Today;
 end;
@@ -1447,12 +1779,12 @@ end;
 
 class function Chrono.Weekday(const Day: Chrono.TWeekdayNum; const FirstDayOfWeek: Chrono.TWeekday): Chrono.TWeekday;
 begin
-  Result := TWeekday(WeekdaysArray[Word(FirstDayOfWeek), Day]);
+  Result.FDay := WeekdayAt(FirstDayOfWeek.FDay, Day);
 end;
 
 class function Chrono.Weekday(const Day: TWeekdayNum): TWeekday;
 begin
-  Result := TWeekday(WeekdaysArray[Word(FirstDayOfWeek), Day]);
+  Result.FDay := WeekdayAt(FirstDayOfWeek.FDay, Day);
 end;
 
 { Chrono.TDuration }
@@ -1479,7 +1811,7 @@ end;
 
 class function Chrono.TDuration.FromDays(const Value: Int64): TDuration;
 begin
-  Result.FMilliseconds := Value * Int64(IMSecsPerDay);
+  Result.FMilliseconds := Value * MSecsPerDay;
 end;
 
 class function Chrono.TDuration.Zero: TDuration;
@@ -1497,7 +1829,7 @@ begin
   // midnight correctly without losing precision through System.TDateTime (Double).
   DaysDiff := Integer(B.Date) - Integer(A.Date);
   MSecDiff := Integer(B.Time) - Integer(A.Time);
-  Result.FMilliseconds := Int64(DaysDiff) * IMSecsPerDay + MSecDiff;
+  Result.FMilliseconds := Int64(DaysDiff) * MSecsPerDay + MSecDiff;
 end;
 
 function Chrono.TDuration.TotalMilliseconds: Int64;
@@ -1522,17 +1854,17 @@ end;
 
 function Chrono.TDuration.TotalDays: Double;
 begin
-  Result := FMilliseconds / IMSecsPerDay;
+  Result := FMilliseconds / MSecsPerDay;
 end;
 
 function Chrono.TDuration.GetDays: TDays;
 begin
-  Result := System.Abs(FMilliseconds div IMSecsPerDay);
+  Result := System.Abs(FMilliseconds div MSecsPerDay);
 end;
 
 function Chrono.TDuration.GetHours: THours;
 begin
-  Result := System.Abs((FMilliseconds mod IMSecsPerDay) div MSecsPerHour);
+  Result := System.Abs((FMilliseconds mod MSecsPerDay) div MSecsPerHour);
 end;
 
 function Chrono.TDuration.GetMinutes: TMinutes;
@@ -1760,7 +2092,6 @@ end;
 
 class constructor Chrono.TTimeZone.Create;
 begin
-  Timezones := TDictionary<string, TTimeZoneBias>.Create;
   Register('UT',   0);
   Register('UTC',  0);
   Register('GMT',  0);
@@ -1793,14 +2124,29 @@ begin
   Register('Y',    12 * 60);
 end;
 
-class destructor Chrono.TTimeZone.Destroy;
+class function Chrono.TTimeZone.IndexOf(const Code: string): Integer;
+var
+  I: Integer;
 begin
-  FreeAndNil(Timezones);
+  // Comparing the lengths first skips the string comparison for most entries.
+  for I := 0 to High(Timezones) do
+    if (Length(Timezones[I].Code) = Length(Code)) and SameText(Timezones[I].Code, Code) then
+      Exit(I);
+  Result := -1;
 end;
 
 class procedure Chrono.TTimeZone.Register(const Code: string; Bias: TTimeZoneBias);
+var
+  I: Integer;
 begin
-  Timezones.AddOrSetValue(Code, Bias);
+  I := IndexOf(Code);
+  if I < 0 then
+  begin
+    I := Length(Timezones);
+    SetLength(Timezones, I + 1);
+    Timezones[I].Code := Code;
+  end;
+  Timezones[I].Bias := Bias;
 end;
 
 class function Chrono.TTimeZone.System: TTimeZone;
@@ -1852,13 +2198,15 @@ begin
 end;
 
 class operator Chrono.TTimeZone.Explicit(const A: string): TTimeZone;
+var
+  I: Integer;
 begin
   // Parses three positional formats: "+HH" (3 chars), "+HHMM" (5 chars) and
   // "+HH:MM" (6 chars, colon checked at position 4). If the string matches none
   // of them by length/content, we fall through to the named-zone lookup
-  // (Timezones.TryGetValue) and raise EConvertError if the name is not found
+  // (the Timezones registry) and raise EConvertError if the name is not found
   // there either. Note: a length matching no case branch (e.g. 4) goes STRAIGHT
-  // to the dictionary lookup without an intermediate raise — this is
+  // to the registry lookup without an intermediate raise — this is
   // intentional, not a forgotten case. An empty string means UTC.
   case Length(A) of
     0:
@@ -1881,8 +2229,10 @@ begin
         end;
   end;
 
-  if not Timezones.TryGetValue(A, Result.FBias) then
-    raise EConvertError.CreateResFmt(@SInvalidTimeZone, [A]);
+  I := IndexOf(A);
+  if I < 0 then
+    raise EConvertError.CreateFmt(Chrono.FLocale.ErrorText(Chrono.TLocale.TError.InvalidTimeZone), [A]);
+  Result.FBias := Timezones[I].Bias;
 end;
 
 class operator Chrono.TTimeZone.Explicit(const A: TTimeZone): Chrono.TTime;
@@ -1922,6 +2272,34 @@ end;
 
 { Date }
 
+class function Chrono.TDate.FromStamp(const Stamp: Int64): Chrono.TDate;
+begin
+  if (Stamp < Chrono.MinDateStamp) or (Stamp > Chrono.MaxDateStamp) then
+    Chrono.ErrorDateRange;
+  Result.FDate := Stamp;
+end;
+
+class function Chrono.TDate.FromDateTime(const Value: System.TDateTime): Chrono.TDate;
+begin
+  Result := FromStamp(Trunc(Value) + DateDelta);
+end;
+
+class function Chrono.TDate.IsValid(const Year, Month, Day: Integer): Boolean;
+begin
+  Result := (Year >= Chrono.MinYear) and (Year <= Chrono.MaxYear) and
+    (Month >= 1) and (Month <= 12) and
+    (Day >= 1) and (Day <= Chrono.DaysInMonth(Year, Month));
+end;
+
+class function Chrono.TDate.TryCreate(const Year, Month, Day: Integer; out Date: Chrono.TDate): Boolean;
+begin
+  Result := IsValid(Year, Month, Day);
+  if Result then
+    Date.EncodeValid(Year, Month, Day)
+  else
+    Date.FDate := 0;
+end;
+
 constructor Chrono.TDate.Create(const Date: Chrono.TDate);
 begin
   FDate := Date.FDate;
@@ -1929,7 +2307,7 @@ end;
 
 constructor Chrono.TDate.Create(const Date: System.TDateTime);
 begin
-  FDate := Trunc(Date) + DateDelta;
+  Self := FromDateTime(Date);
 end;
 
 constructor Chrono.TDate.Create(const Year: TYear; const Month: TMonth; const Day: TDay);
@@ -1937,14 +2315,14 @@ begin
   Encode(Year, Month, Day);
 end;
 
-constructor Chrono.TDate.Create(const Year, Month, Day: Word);
+constructor Chrono.TDate.Create(const Year, Month, Day: Integer);
 begin
   Encode(Year, Month, Day);
 end;
 
-class operator Chrono.TDate.Implicit(const a: System.TDateTime): Chrono.TDate;
+class operator Chrono.TDate.Explicit(const a: System.TDateTime): Chrono.TDate;
 begin
-  Result.FDate := Trunc(a) + DateDelta;
+  Result := FromDateTime(a);
 end;
 
 class operator Chrono.TDate.Implicit(const a: Chrono.TDate): System.TDateTime;
@@ -1954,7 +2332,11 @@ end;
 
 class operator Chrono.TDate.Explicit(const a: Integer): Chrono.TDate;
 begin
-  Result.FDate := a;
+  // 0 is TDate.Zero, the value of an uninitialized date; anything else must be a real date.
+  if a = 0 then
+    Result.FDate := 0
+  else
+    Result := FromStamp(a);
 end;
 
 class operator Chrono.TDate.Explicit(const a: Chrono.TDate): Integer;
@@ -1974,7 +2356,7 @@ end;
 
 class operator Chrono.TDate.Add(const a: Chrono.TDate; const b: Integer): Chrono.TDate;
 begin
-  Result.FDate := a.FDate + b;
+  Result := FromStamp(Int64(a.FDate) + b);
 end;
 
 class operator Chrono.TDate.Subtract(const a, b: Chrono.TDate): Integer;
@@ -1984,12 +2366,12 @@ end;
 
 class operator Chrono.TDate.Subtract(const a: Chrono.TDate; const b: Integer): Chrono.TDate;
 begin
-  Result.FDate := a.FDate - b;
+  Result := FromStamp(Int64(a.FDate) - b);
 end;
 
-class operator Chrono.TDate.Implicit(const a: TTimeStamp): Chrono.TDate;
+class operator Chrono.TDate.Explicit(const a: TTimeStamp): Chrono.TDate;
 begin
-  Result.FDate := a.Date;
+  Result := FromStamp(a.Date);
 end;
 
 class operator Chrono.TDate.Implicit(const a: Chrono.TDate): TTimeStamp;
@@ -1998,29 +2380,31 @@ begin
   Result.Date := a.FDate;
 end;
 
-class operator Chrono.TDate.Implicit(const a: Variant): Chrono.TDate;
+class operator Chrono.TDate.Explicit(const a: Variant): Chrono.TDate;
 begin
-  Result.FDate := Trunc(VarToDateTime(a)) + DateDelta;
+  Result := FromDateTime(VarToDateTime(a));
 end;
 
-class operator Chrono.TDate.Implicit(const a: Chrono.TDate): Variant;
+class operator Chrono.TDate.Explicit(const a: Chrono.TDate): Variant;
 begin
   // Writing TVarData directly instead of going through the standard Variant
   // conversion is an optimization that avoids an intermediate copy/rounding.
-  // Result is a fresh (unassigned) Variant here, so nothing needs to be cleared.
-
+  // The language does not guarantee that a managed function result starts
+  // empty (the compiler may pass the destination variable itself), so release
+  // whatever it holds first; for an empty Variant this is a single check.
+  VarClear(Result);
   TVarData(Result).VType := varDate;
   TVarData(Result).VDate := a.FDate - DateDelta;
 end;
 
 class operator Chrono.TDate.Inc(const a: Chrono.TDate): Chrono.TDate;
 begin
-  Result.FDate := a.FDate + 1;
+  Result := FromStamp(Int64(a.FDate) + 1);
 end;
 
 class operator Chrono.TDate.Dec(const a: Chrono.TDate): Chrono.TDate;
 begin
-  Result.FDate := a.FDate - 1;
+  Result := FromStamp(Int64(a.FDate) - 1);
 end;
 
 class operator Chrono.TDate.Equal(const a, b: Chrono.TDate): Boolean;
@@ -2055,10 +2439,8 @@ end;
 
 class operator Chrono.TDate.Add(const a: Chrono.TDate; const b: Chrono.TPeriod): Chrono.TDate;
 var
-  TotalMonths, NewYear, NewMonth: Integer;
-  Y: TYear;
-  M: TMonth;
-  D: TDay;
+  TotalMonths, NewYear, NewMonth, MaxDay: Integer;
+  Y, M, D: Word;
 begin
   a.Decode(Y, M, D);
 
@@ -2074,15 +2456,17 @@ begin
   end;
   Inc(NewMonth); // back to the 1..12 range
 
-  Y := NewYear + b.Years; // NewYear already includes the month carry; now add the period's years
+  NewYear := NewYear + b.Years; // NewYear already includes the month carry; now add the period's years
+  if (NewYear < Chrono.MinYear) or (NewYear > Chrono.MaxYear) then
+    Chrono.ErrorDateRange;
 
   // Clamp the day if the new month is shorter (same as SetMonth)
-  var MaxDay := TMonth(Word(NewMonth)).Days(Y);
-  if Integer(D) > MaxDay then
+  MaxDay := Chrono.DaysInMonth(NewYear, NewMonth);
+  if D > MaxDay then
     D := MaxDay;
 
-  Result.Encode(Y, NewMonth, Word(D));
-  Result.FDate := Result.FDate + B.Days;
+  Result.EncodeValid(NewYear, NewMonth, D);
+  Result := Result + b.Days;
 end;
 
 class operator Chrono.TDate.Subtract(const A: Chrono.TDate; const B: Chrono.TPeriod): Chrono.TDate;
@@ -2108,6 +2492,11 @@ begin
   Result := TSequence.Create(First, Last);
 end;
 
+class function Chrono.TDate.Zero: Chrono.TDate;
+begin
+  Result.FDate := 0;
+end;
+
 class function Chrono.TDate.Today: Chrono.TDate;
 {$IFDEF MSWINDOWS}
 var
@@ -2129,8 +2518,13 @@ end;
 {$ENDIF POSIX}
 
 function Chrono.TDate.GetISO: string;
+var
+  Y, M, D: Word;
 begin
-  Result := ToString(ISO8601DateFormatSettings);
+  // Built from Decode rather than through System.TDateTime, so it agrees with
+  // Decode for every value, TDate.Zero (0000-12-31) included.
+  Decode(Y, M, D);
+  Result := System.SysUtils.Format('%.4d-%.2d-%.2d', [Y, M, D]);
 end;
 
 procedure Chrono.TDate.SetISO(const Value: string);
@@ -2140,66 +2534,41 @@ end;
 
 procedure Chrono.TDate.Decode(var Year, Month, Day: Word);
 const
-  D1 = 365;
-  D4 = D1 * 4 + 1;    // days in a 4-year cycle with one leap year
-  D100 = D4 * 25 - 1; // days in a 100-year cycle (minus 1: a year divisible by 100 is not leap)
-  D400 = D100 * 4 + 1;// days in a 400-year cycle (plus 1: a year divisible by 400 is leap)
+  March1900 = 693655;     // 1900-03-01
+  Days1900To2100 = 73049; // up to 2100-03-01; 2100 is the next year without February 29
 var
-  I: Word;
-  T: Integer;
+  N, N1, C, N2, Z, NY, M, J: Cardinal;
 begin
-  // Special case: FDate = 0 is not a real date in this numbering
-  // (see Encode: 0001-01-01 => FDate = 1). 0 is the value of an uninitialized
-  // TDate (default(TDate), TDate.Zero). It is treated as "the day before the
-  // era" and decoded as December 31 of year 0 (proleptically).
-  // NOTE: this is NOT System.TDateTime(0), which is 1899-12-30 — do not mix up
-  // the "zero" dates of the two systems when converting.
-  if FDate = 0 then
+  // Arithmetic after C. Neri and L. Schneider, "Euclidean affine functions and
+  // their application to calendar algorithms" (2022). Years are counted from
+  // March 1, so February 29 is the last day of a year and the month lengths no
+  // longer depend on the year; January and February are months 13 and 14 of
+  // the previous year. Every division is by a constant, which the compiler
+  // turns into a multiplication.
+  //
+  // FDate = 0 (TDate.Zero, an uninitialized TDate) is not a real date; the same
+  // formulas decode it as 0000-12-31, the day before 0001-01-01. This is NOT
+  // System.TDateTime(0), which is 1899-12-30.
+  N := Cardinal(FDate - March1900);
+  if N < Days1900To2100 then
   begin
-    Year := 0;
-    Month := 12;
-    Day := 31;
-    Exit;
-  end;
-
-  // Fast path: for 1970..2100 use the precomputed DateYMD table
-  // (Chrono.DateYMD.inc) instead of arithmetic — a single array lookup.
-  if (FDate >= Low(DateYMD)) and (FDate <= High(DateYMD)) then
+    // Fast path: in 1900-03-01..2100-02-28 every fourth year is a leap year.
+    N2 := 4 * N + 3;
+    C := 19;
+  end
+  else
   begin
-    Year := DateYMD[FDate].Y;
-    Month := DateYMD[FDate].M;
-    Day := DateYMD[FDate].D;
-    Exit;
+    N1 := 4 * Cardinal(FDate + 305) + 3; // FDate + 305 = days since 0000-03-01
+    C := N1 div 146097;                  // century
+    N2 := 4 * ((N1 - C * 146097) shr 2) + 3;
   end;
-
-  // Otherwise split the linear day number into (year, day-of-year) by dividing
-  // successively by the 400-, 100-, 4- and 1-year cycles, correcting the "extra"
-  // 4th sub-cycle (the edge case on the last day of a 400-year or 4-year cycle,
-  // when DivMod returns I=4 instead of the expected 0..3).
-
-  T := FDate - 1;
-
-  Year := (T div D400) * 400 + 1;
-  T := T mod D400;
-
-  DivMod(T, D100, I, Day);
-  if I = 4 then
-  begin
-    Dec(I);
-    Inc(Day, D100);
-  end;
-  Inc(Year, I * 100);
-  DivMod(Day, D4, I, Day);
-  Inc(Year, I * 4);
-  DivMod(Day, D1, I, Day);
-  if I = 4 then
-  begin
-    Dec(I);
-    Inc(Day, D1);
-  end;
-  Inc(Year, I);
-  Month := MonthOfDay[YearIsLeap[Year], Day + 1];
-  Day := MonthDayOfDay[YearIsLeap[Year], Day + 1];
+  Z := N2 div 1461;                      // year of the century
+  NY := (N2 - Z * 1461) shr 2;           // day of the year from March 1, 0..365
+  M := (2141 * NY + 197913) shr 16;      // month, 3..14
+  Day := NY - (979 * M - 2919) shr 5 + 1;
+  J := Ord(NY >= 306);                   // January or February: the next calendar year
+  Year := 100 * C + Z + J;
+  Month := M - 12 * J;
 end;
 
 procedure Chrono.TDate.Decode(var Year, Month: Word);
@@ -2221,49 +2590,39 @@ begin
   Decode(Year.FYear, Month.FMonth, Day.FDay);
 end;
 
-procedure Chrono.TDate.Encode(const Year, Month, Day: Word);
+procedure Chrono.TDate.EncodeValid(const Year, Month, Day: Integer);
 var
-  I: Integer;
+  J, Y, C: Cardinal;
 begin
-  if (Year >= Low(YMDDate)) and (Year <= High(YMDDate)) then
-  begin
-    FDate := YMDDate[Year, Month, Day];
-    Exit;
-  end;
-  I := Year - 1;
-  FDate := I * 365 + I div 4 - I div 100 + I div 400 + MonthOffset[TYear(Year).IsLeap, Month] + Day;
+  // The inverse of Decode, with years counted from March 1: the days before
+  // March 1 of the year (365 a year plus the leap days), then the days from
+  // March 1 to the first of the month. 0001-01-01 is day 306 from 0000-03-01.
+  J := Ord(Month <= 2);                  // January and February belong to the previous year
+  Y := Cardinal(Year) - J;
+  C := Y div 100;
+  FDate := Integer((1461 * Y) shr 2 - C + C shr 2 + (979 * (Cardinal(Month) + 12 * J) - 2919) shr 5) + Day - 306;
 end;
 
-procedure Chrono.TDate.Encode(const Year, Month: Word);
-var
-  I: Integer;
+procedure Chrono.TDate.Encode(const Year, Month, Day: Integer);
 begin
-  if (Year >= Low(YMDDate)) and (Year <= High(YMDDate)) then
-  begin
-    FDate := YMDDate[Year, Month, 1];
-    Exit;
-  end;
-  I := Year - 1;
-  FDate := I * 365 + I div 4 - I div 100 + I div 400 + MonthOffset[TYear(Year).IsLeap, Month] + 1;
+  if not IsValid(Year, Month, Day) then
+    Chrono.ErrorDate(Year, Month, Day);
+  EncodeValid(Year, Month, Day);
 end;
 
-procedure Chrono.TDate.Encode(const Year: Word);
-var
-  I: Integer;
+procedure Chrono.TDate.Encode(const Year, Month: Integer);
 begin
-  if (Year >= Low(YMDDate)) and (Year <= High(YMDDate)) then
-  begin
-    FDate := YMDDate[Year, 1, 1];
-    Exit;
-  end;
+  Encode(Year, Month, 1);
+end;
 
-  I := Year - 1;
-  FDate := I * 365 + I div 4 - I div 100 + I div 400 + 1;
+procedure Chrono.TDate.Encode(const Year: Integer);
+begin
+  Encode(Year, 1, 1);
 end;
 
 procedure Chrono.TDate.Encode(const Year: TYear; const Month: TMonth; const Day: TDay);
 begin
-  Encode(Year.FYear, Month.FMonth, Day.FDay);
+  Encode(Integer(Year.FYear), Integer(Month.FMonth), Integer(Day.FDay));
 end;
 
 function Chrono.TDate.GetDay: TDay;
@@ -2280,8 +2639,15 @@ begin
 end;
 
 procedure Chrono.TDate.SetDayOfYear(const Value: TDayOfYear);
+var
+  Y: Word;
+  First: Chrono.TDate;
 begin
-  FDate := Year.First.FDate + Value - 1;
+  Decode(Y);
+  First.Encode(Integer(Y));
+  if (Value < 1) or (Value > 365 + Ord(Chrono.IsLeapYear(Y))) then
+    Chrono.ErrorDayOfYear(Value, Y);
+  FDate := First.FDate + Value - 1;
 end;
 
 function Chrono.TDate.GetDayOfMonth: TDayOfMonth;
@@ -2295,7 +2661,9 @@ var
   Y, M, D: Word;
 begin
   Decode(Y, M, D);
-  Encode(Y, M, Value.FDay);
+  // Unlike SetMonth there is no sensible day to clamp to: a day that does not
+  // exist in this month raises EConvertError.
+  Encode(Integer(Y), Integer(M), Integer(Value.FDay));
 end;
 
 function Chrono.TDate.GetMonth: TMonth;
@@ -2308,20 +2676,18 @@ end;
 
 procedure Chrono.TDate.SetMonth(const Value: TMonth);
 var
-  Y: TYear;
-  M: TMonth;
-  D, L: TDay;
+  Y, M, D, MaxDay: Word;
 begin
   Decode(Y, M, D);
 
-  if M = Value then
+  if M = Value.FMonth then
     Exit;
 
-  L := MonthDayCount[Y.IsLeap, Word(Value)];
-  if L < D then
-    D := L;
+  MaxDay := Chrono.DaysInMonth(Y, Chrono.CheckedMonth(Value.FMonth));
+  if D > MaxDay then
+    D := MaxDay;
 
-  Encode(Y, Value, D);
+  Encode(Integer(Y), Integer(Value.FMonth), Integer(D));
 end;
 
 function Chrono.TDate.GetQuarter: TQuarter;
@@ -2329,7 +2695,7 @@ var
   Y, M, D: Word;
 begin
   Decode(Y, M, D);
-  Result.FQuarter := MonthQuarter[M];
+  Result.FQuarter := (M + 2) div 3;
 end;
 
 function Chrono.TDate.GetYear: TYear;
@@ -2339,24 +2705,19 @@ end;
 
 procedure Chrono.TDate.SetYear(const Value: TYear);
 var
-  Y: TYear;
-  M: TMonth;
-  D: TDay;
+  Y, M, D, NewYear: Word;
 begin
   Decode(Y, M, D);
+  NewYear := Chrono.CheckedYear(Value.FYear);
 
-  if Y = Value then
+  if Y = NewYear then
     Exit;
 
-  if (M = 2) and (D = 29) and Y.IsLeap then
-  begin
-    if Value.IsLeap then
-      Encode(Value, M, D)
-    else
-      Encode(Value, M, 28);
-  end
-  else
-    Encode(Value, M, D);
+  // February 29 becomes February 28 in a non-leap year.
+  if (M = 2) and (D = 29) and not Chrono.IsLeapYear(NewYear) then
+    D := 28;
+
+  Encode(Integer(NewYear), Integer(M), Integer(D));
 end;
 
 function Chrono.TDate.GetWeekday: TWeekday;
@@ -2370,7 +2731,9 @@ end;
 
 procedure Chrono.TDate.SetWeekday(const Value: TWeekday);
 begin
-  FDate := FDate + Integer(Value - Weekday);
+  // Moves within the week that contains the date, as StartOfWeek and EndOfWeek
+  // see it: the week starts on Chrono.FirstDayOfWeek.
+  Self := FromStamp(Int64(StartOfWeek.FDate) + Chrono.WeekdayIndex(FirstDayOfWeek.FDay, Chrono.CheckedWeekday(Value.FDay)) - 1);
 end;
 
 function Chrono.TDate.GetQuarterOfYear: TQuarterOfYear;
@@ -2378,8 +2741,9 @@ var
   Y, M: Word;
 begin
   Decode(Y, M);
-  Result.FYear := Y;
-  Result.FQuarter := MonthQuarter[M];
+  // Fields are set directly, so the getter does not raise for TDate.Zero.
+  Result.FYear.FYear := Y;
+  Result.FQuarter.FQuarter := (M + 2) div 3;
 end;
 
 function Chrono.TDate.GetMonthOfYear: TMonthOfYear;
@@ -2387,8 +2751,8 @@ var
   Y, M: Word;
 begin
   Decode(Y, M);
-  Result.FYear := Y;
-  Result.FMonth := M;
+  Result.FYear.FYear := Y;
+  Result.FMonth.FMonth := M;
 end;
 
 procedure Chrono.TDate.SetMonthOfYear(const Value: TMonthOfYear);
@@ -2404,7 +2768,7 @@ end;
 
 function Chrono.TDate.StartOfWeek(const FirstDayOfWeek: TWeekday): Chrono.TDate;
 begin
-  Result.FDate := FDate - (Weekday.DayOfWeek[FirstDayOfWeek] - 1);
+  Result := FromStamp(Int64(FDate) - (Weekday.DayOfWeek[FirstDayOfWeek] - 1));
 end;
 
 function Chrono.TDate.EndOfWeek: Chrono.TDate;
@@ -2414,12 +2778,12 @@ end;
 
 function Chrono.TDate.EndOfWeek(const FirstDayOfWeek: TWeekday): Chrono.TDate;
 begin
-  Result.FDate := FDate + (7 - Weekday.DayOfWeek[FirstDayOfWeek]);
+  Result := FromStamp(Int64(FDate) + (7 - Weekday.DayOfWeek[FirstDayOfWeek]));
 end;
 
 function Chrono.TDate.ToString: string;
 begin
-  Result := DateToStr(FDate - DateDelta);
+  Result := DateToStr(FDate - DateDelta, Chrono.FLocale.Apply(FormatSettings, FormatSettings.ShortDateFormat));
 end;
 
 function Chrono.TDate.ToString(const FormatSettings: TFormatSettings): string;
@@ -2429,7 +2793,7 @@ end;
 
 function Chrono.TDate.Format(const Format: string): string;
 begin
-  Result := FormatDateTime(Format, FDate - DateDelta);
+  Result := FormatDateTime(Format, FDate - DateDelta, Chrono.FLocale.Apply(FormatSettings, Format));
 end;
 
 function Chrono.TDate.Format(const Format: string; const FormatSettings: TFormatSettings): string;
@@ -2453,7 +2817,7 @@ var
 begin
   Result := TryStrToDate(Value, D);
   if Result then
-    Self := D;
+    Self := FromDateTime(D);
 end;
 
 function Chrono.TDate.TryParse(const Value: string; const FormatSettings: TFormatSettings): Boolean;
@@ -2462,7 +2826,7 @@ var
 begin
   Result := TryStrToDate(Value, D, FormatSettings);
   if Result then
-    Self := D;
+    Self := FromDateTime(D);
 end;
 
 function Chrono.TDate.WithYear(const Value: TYear): Chrono.TDate;
@@ -2487,7 +2851,7 @@ function Chrono.TDate.NextWeekday(const Day: Chrono.TWeekday): Chrono.TDate;
 var
   Delta: Integer;
 begin
-  Delta := Integer(Day) - Integer(Self.Weekday);
+  Delta := Day - Self.Weekday;
   if Delta < 0 then
     Inc(Delta, 7);
   Result := Self + Delta;
@@ -2497,7 +2861,7 @@ function Chrono.TDate.PreviousWeekday(const Day: Chrono.TWeekday): Chrono.TDate;
 var
   Delta: Integer;
 begin
-  Delta := Integer(Self.Weekday) - Integer(Day);
+  Delta := Self.Weekday - Day;
   if Delta < 0 then
     Inc(Delta, 7);
   Result := Self - Delta;
@@ -2529,6 +2893,50 @@ end;
 
 { Time }
 
+class function Chrono.TTime.Wrap(const MSecs: Int64): Chrono.TTime;
+begin
+  Result.FTime := MSecs mod MSecsPerDay;
+  if Result.FTime < 0 then
+    Inc(Result.FTime, MSecsPerDay);
+end;
+
+class function Chrono.TTime.FromMSecs(const MSecs: Int64): Chrono.TTime;
+begin
+  if (MSecs < 0) or (MSecs >= MSecsPerDay) then
+    Chrono.ErrorTimeRange(MSecs);
+  Result.FTime := MSecs;
+end;
+
+class function Chrono.TTime.FromDateTime(const Value: System.TDateTime): Chrono.TTime;
+begin
+  // Abs() makes this work for negative TDateTime values (dates before
+  // 1899-12-30): their fractional part is a time of day whose sign is ignored,
+  // e.g. -1.25 is 1899-12-29 06:00.
+  Result.FTime := Abs(Round(Value * MSecsPerDay)) mod MSecsPerDay;
+end;
+
+class function Chrono.TTime.IsValid(const Hour, Minute, Second, MSec: Integer): Boolean;
+begin
+  Result := (Hour >= 0) and (Hour < HoursPerDay) and
+    (Minute >= 0) and (Minute < MinsPerHour) and
+    (Second >= 0) and (Second < SecsPerMin) and
+    (MSec >= 0) and (MSec < MSecsPerSec);
+end;
+
+class function Chrono.TTime.TryCreate(const Hour, Minute, Second: Integer; out Time: Chrono.TTime): Boolean;
+begin
+  Result := TryCreate(Hour, Minute, Second, 0, Time);
+end;
+
+class function Chrono.TTime.TryCreate(const Hour, Minute, Second, MSec: Integer; out Time: Chrono.TTime): Boolean;
+begin
+  Result := IsValid(Hour, Minute, Second, MSec);
+  if Result then
+    Time.FTime := Hour * MSecsPerHour + Minute * MSecsPerMinute + Second * MSecsPerSec + MSec
+  else
+    Time.FTime := 0;
+end;
+
 constructor Chrono.TTime.Create(const Time: Chrono.TTime);
 begin
   FTime := Time.FTime;
@@ -2536,12 +2944,17 @@ end;
 
 constructor Chrono.TTime.Create(const Time: System.TDateTime);
 begin
-  Self := Time;
+  Self := FromDateTime(Time);
 end;
 
-constructor Chrono.TTime.Create(Hour, Min, Sec, MSec: Word);
+constructor Chrono.TTime.Create(const Hour, Minute, Second, MSec: Integer);
 begin
-  Encode(Hour, Min, Sec, MSec);
+  Encode(Hour, Minute, Second, MSec);
+end;
+
+class function Chrono.TTime.Zero: Chrono.TTime;
+begin
+  Result.FTime := 0;
 end;
 
 class function Chrono.TTime.Now: Chrono.TTime;
@@ -2568,12 +2981,12 @@ end;
 
 class operator Chrono.TTime.Add(const L: Chrono.TTime; R: Integer): Chrono.TTime;
 begin
-  Result.FTime := L.FTime + R;
+  Result := Wrap(Int64(L.FTime) + R);
 end;
 
-class operator Chrono.TTime.Add(const L, R: Chrono.TTime): Chrono.TTime;
+class operator Chrono.TTime.Add(const L: Chrono.TTime; const R: Chrono.TDuration): Chrono.TTime;
 begin
-  Result.FTime := L.FTime + R.FTime;
+  Result := Wrap(L.FTime + R.TotalMilliseconds mod MSecsPerDay);
 end;
 
 class operator Chrono.TTime.Subtract(const L, R: Chrono.TTime): TDuration;
@@ -2583,47 +2996,52 @@ end;
 
 class operator Chrono.TTime.Subtract(const L: Chrono.TTime; R: Integer): Chrono.TTime;
 begin
-  Result.FTime:= L.FTime - R;
+  Result := Wrap(Int64(L.FTime) - R);
+end;
+
+class operator Chrono.TTime.Subtract(const L: Chrono.TTime; const R: Chrono.TDuration): Chrono.TTime;
+begin
+  Result := Wrap(L.FTime - R.TotalMilliseconds mod MSecsPerDay);
 end;
 
 class operator Chrono.TTime.Add(const L: Chrono.TTime; R: TSeconds): Chrono.TTime;
 begin
-  Result.FTime := L.FTime + R * MSecsPerSec;
+  Result := Wrap(L.FTime + Int64(R) * MSecsPerSec);
 end;
 
 class operator Chrono.TTime.Add(const L: Chrono.TTime; R: TMinutes): Chrono.TTime;
 begin
-  Result.FTime := L.FTime + R * SecsPerMin * MSecsPerSec;
+  Result := Wrap(L.FTime + Int64(R) * MSecsPerMinute);
 end;
 
 class operator Chrono.TTime.Add(const L: Chrono.TTime; R: THours): Chrono.TTime;
 begin
-  Result.FTime := L.FTime + R * MSecsPerHour;
+  Result := Wrap(L.FTime + Int64(R) * MSecsPerHour);
 end;
 
 class operator Chrono.TTime.Subtract(const L: Chrono.TTime; R: TSeconds): Chrono.TTime;
 begin
-  Result.FTime := L.FTime - R * MSecsPerSec;
+  Result := Wrap(L.FTime - Int64(R) * MSecsPerSec);
 end;
 
 class operator Chrono.TTime.Subtract(const L: Chrono.TTime; R: TMinutes): Chrono.TTime;
 begin
-  Result.FTime := L.FTime - R * SecsPerMin * MSecsPerSec;
+  Result := Wrap(L.FTime - Int64(R) * MSecsPerMinute);
 end;
 
 class operator Chrono.TTime.Subtract(const L: Chrono.TTime; R: THours): Chrono.TTime;
 begin
-  Result.FTime := L.FTime - R * MSecsPerHour;
+  Result := Wrap(L.FTime - Int64(R) * MSecsPerHour);
 end;
 
 class operator Chrono.TTime.Dec(const a: Chrono.TTime): Chrono.TTime;
 begin
-  Result.FTime := a.FTime - 1;
+  Result := Wrap(Int64(a.FTime) - 1);
 end;
 
 class operator Chrono.TTime.Inc(const a: Chrono.TTime): Chrono.TTime;
 begin
-  Result.FTime := a.FTime + 1;
+  Result := Wrap(Int64(a.FTime) + 1);
 end;
 
 class operator Chrono.TTime.Equal(const a, b: Chrono.TTime): Boolean;
@@ -2663,27 +3081,22 @@ end;
 
 class operator Chrono.TTime.Explicit(const a: string): Chrono.TTime;
 begin
-  Result := StrToTime(a);
+  Result := FromDateTime(StrToTime(a));
 end;
 
 class operator Chrono.TTime.Implicit(const a: Chrono.TTime): System.TDateTime;
 begin
-  Result := a.FTime / FMSecsPerDay;
+  Result := a.FTime / MSecsPerDay;
 end;
 
-class operator Chrono.TTime.Implicit(const a: System.TDateTime): Chrono.TTime;
+class operator Chrono.TTime.Explicit(const a: System.TDateTime): Chrono.TTime;
 begin
-  // Abs() drops the sign of the System.TDateTime fraction. For NEGATIVE
-  // TDateTime values (dates BEFORE 1899-12-30) Delphi treats the fractional part
-  // as a time of day whose sign is ignored (e.g. -1.25 is 1899-12-29 06:00),
-  // so taking Abs of the whole value already rounded to milliseconds may give
-  // an incorrect result for such dates when the integer part is large.
-  Result.FTime := Abs(Round(a * FMSecsPerDay)) mod IMSecsPerDay;
+  Result := FromDateTime(a);
 end;
 
-class operator Chrono.TTime.Implicit(const a: TTimeStamp): Chrono.TTime;
+class operator Chrono.TTime.Explicit(const a: TTimeStamp): Chrono.TTime;
 begin
-  Result.FTime := a.Time;
+  Result := FromMSecs(a.Time);
 end;
 
 class operator Chrono.TTime.Implicit(const a: Chrono.TTime): TTimeStamp;
@@ -2692,15 +3105,17 @@ begin
   Result.Date := 0;
 end;
 
-class operator Chrono.TTime.Implicit(const a: Variant): Chrono.TTime;
+class operator Chrono.TTime.Explicit(const a: Variant): Chrono.TTime;
 begin
-  Result := VarToDateTime(a);
+  Result := FromDateTime(VarToDateTime(a));
 end;
 
-class operator Chrono.TTime.Implicit(const a: Chrono.TTime): Variant;
+class operator Chrono.TTime.Explicit(const a: Chrono.TTime): Variant;
 begin
+  // See Chrono.TDate.Explicit(Chrono.TDate): Variant for why VarClear is needed.
+  VarClear(Result);
   TVarData(Result).VType := varDate;
-  TVarData(Result).VDate := a.FTime / FMSecsPerDay;
+  TVarData(Result).VDate := a.FTime / MSecsPerDay;
 end;
 
 class operator Chrono.TTime.Explicit(const a: Chrono.TTime): Integer;
@@ -2710,14 +3125,14 @@ end;
 
 class operator Chrono.TTime.Explicit(const a: Integer): Chrono.TTime;
 begin
-  Result.FTime := a;
+  Result := FromMSecs(a);
 end;
 
 {$region 'Hours'}
 
 class operator Chrono.TTime.Explicit(const a: THours): Chrono.TTime;
 begin
-  Result.FTime := a * MSecsPerHour;
+  Result := FromMSecs(Int64(a) * MSecsPerHour);
 end;
 
 class operator Chrono.TTime.Explicit(const a: Chrono.TTime): THours;
@@ -2781,7 +3196,7 @@ end;
 
 class operator Chrono.TTime.Explicit(const a: TMinutes): Chrono.TTime;
 begin
-  Result.FTime := a * MSecsPerMinute;
+  Result := FromMSecs(Int64(a) * MSecsPerMinute);
 end;
 
 class operator Chrono.TTime.Explicit(const a: Chrono.TTime): TMinutes;
@@ -2845,7 +3260,7 @@ end;
 
 class operator Chrono.TTime.Explicit(const a: TSeconds): Chrono.TTime;
 begin
-  Result.FTime := a * MSecsPerSec;
+  Result := FromMSecs(Int64(a) * MSecsPerSec);
 end;
 
 class operator Chrono.TTime.Explicit(const a: Chrono.TTime): TSeconds;
@@ -2909,7 +3324,7 @@ end;
 
 class operator Chrono.TTime.Explicit(const a: TMilliseconds): Chrono.TTime;
 begin
-  Result.FTime := a;
+  Result := FromMSecs(a);
 end;
 
 class operator Chrono.TTime.Explicit(const a: Chrono.TTime): TMilliseconds;
@@ -2984,21 +3399,21 @@ var
   H, M, S: Word;
 begin
   Decode(H, M, S);
-  Result := S24[H] + S60[M] + S60[S];
+  Result := S24[H] + ':' + S60[M] + ':' + S60[S];
 end;
 
 procedure Chrono.TTime.SetMIME(const Value: string);
 var
   pm, am: Integer;
   Src: string;
-  H, M, S: Word;
+  H, M, S: Integer;
 begin
   // Parses three formats in one function: "HH[:MM[:SS]][ AM|PM]".
   // Steps: cut off the AM/PM suffix (if any), split the rest by ':' into 1-3
   // parts, then adjust the hour for AM/PM AFTER parsing (12 AM -> hour 0,
-  // X PM with X < 12 -> X + 12 — the classic 12-hour clock rule). On invalid
-  // input (not a number) StrToIntDef silently substitutes 0 — no exception is
-  // raised, so validate untrusted input yourself.
+  // X PM with X < 12 -> X + 12 — the classic 12-hour clock rule). Out-of-range
+  // numbers raise EConvertError in Encode, but a part that is not a number at
+  // all is silently read as 0 by StrToIntDef, so validate untrusted input yourself.
 
   Src := UpperCase(Value);
   pm := Pos('PM', Src);
@@ -3027,30 +3442,32 @@ begin
   Encode(H, M, S);
 end;
 
-procedure Chrono.TTime.Encode(Hour, Min, Sec, MSec: Word);
+procedure Chrono.TTime.Encode(const Hour, Minute, Second, MSec: Integer);
 begin
-  FTime :=  (Hour * MSecsPerHour)
-            + (Min * SecsPerMin * MSecsPerSec)
-            + (Sec * MSecsPerSec)
-            +  MSec;
+  if not IsValid(Hour, Minute, Second, MSec) then
+    Chrono.ErrorTime(Hour, Minute, Second, MSec);
+  FTime := Hour * MSecsPerHour + Minute * MSecsPerMinute + Second * MSecsPerSec + MSec;
 end;
 
 procedure Chrono.TTime.Decode(var Hour, Min, Sec: Word);
 var
-  MinCount, MSecCount, MSec: Word;
+  MSec: Word;
 begin
-  DivMod(FTime, SecsPerMin * MSecsPerSec, MinCount, MSecCount);
-  DivMod(MinCount, MinsPerHour, Hour, Min);
-  DivMod(MSecCount, MSecsPerSec, Sec, MSec);
+  Decode(Hour, Min, Sec, MSec);
 end;
 
 procedure Chrono.TTime.Decode(var Hour, Min, Sec, MSec: Word);
 var
-  MinCount, MSecCount: Word;
+  T: Cardinal;
 begin
-  DivMod(FTime, SecsPerMin * MSecsPerSec, MinCount, MSecCount);
-  DivMod(MinCount, MinsPerHour, Hour, Min);
-  DivMod(MSecCount, MSecsPerSec, Sec, MSec);
+  // Divisions by constants, which the compiler turns into multiplications.
+  T := FTime;
+  MSec := T mod MSecsPerSec;
+  T := T div MSecsPerSec;   // seconds since midnight
+  Sec := T mod SecsPerMin;
+  T := T div SecsPerMin;    // minutes since midnight
+  Min := T mod MinsPerHour;
+  Hour := T div MinsPerHour;
 end;
 
 function Chrono.TTime.GetHour: Word;
@@ -3068,27 +3485,27 @@ begin
   Result := (FTime mod (MSecsPerSec * SecsPerMin)) div MSecsPerSec;
 end;
 
-function Chrono.TTime.GetMSecond: Word;
+function Chrono.TTime.GetMillisecond: Word;
 begin
-  Result := (FTime mod (MSecsPerSec * SecsPerMin)) mod MSecsPerSec;
+  Result := FTime mod MSecsPerSec;
 end;
 
 procedure Chrono.TTime.SetHour(const Value: Word);
 begin
-  Encode(Value, Minute, Second, MSecond);
+  Encode(Value, Minute, Second, Millisecond);
 end;
 
 procedure Chrono.TTime.SetMinute(const Value: Word);
 begin
-  Encode(Hour, Value, Second, MSecond);
+  Encode(Hour, Value, Second, Millisecond);
 end;
 
 procedure Chrono.TTime.SetSecond(const Value: Word);
 begin
-  Encode(Hour, Minute, Value, MSecond);
+  Encode(Hour, Minute, Value, Millisecond);
 end;
 
-procedure Chrono.TTime.SetMSecond(const Value: Word);
+procedure Chrono.TTime.SetMillisecond(const Value: Word);
 begin
   Encode(Hour, Minute, Second, Value);
 end;
@@ -3115,12 +3532,12 @@ end;
 
 procedure Chrono.TTime.Parse(const Value: string; const FormatSettings: TFormatSettings);
 begin
-  Self := StrToDateTime(Value, FormatSettings);
+  Self := FromDateTime(StrToDateTime(Value, FormatSettings));
 end;
 
 procedure Chrono.TTime.Parse(const Value: string);
 begin
-  Self := StrToDateTime(Value);
+  Self := FromDateTime(StrToDateTime(Value));
 end;
 
 function Chrono.TTime.TryParse(const Value: string; const FormatSettings: TFormatSettings): Boolean;
@@ -3129,7 +3546,7 @@ var
 begin
   Result := TryStrToDateTime(Value, D, FormatSettings);
   if Result then
-    Self := D;
+    Self := FromDateTime(D);
 end;
 
 function Chrono.TTime.TryParse(const Value: string): Boolean;
@@ -3138,7 +3555,7 @@ var
 begin
   Result := TryStrToDateTime(Value, D);
   if Result then
-    Self := D;
+    Self := FromDateTime(D);
 end;
 
 {$endregion}
@@ -3152,10 +3569,10 @@ end;
 
 class operator Chrono.TWeekday.Implicit(const a: Word): Chrono.TWeekday;
 begin
-  Result.FDay := a;
+  Result.FDay := Chrono.CheckedWeekday(a);
 end;
 
-class operator Chrono.TWeekday.Implicit(const a: Chrono.TWeekday): Word;
+class operator Chrono.TWeekday.Explicit(const a: Chrono.TWeekday): Word;
 begin
   Result := a.FDay;
 end;
@@ -3202,12 +3619,12 @@ end;
 
 class operator Chrono.TWeekday.Add(const a: Chrono.TWeekday; b: Word): Chrono.TWeekday;
 begin
-  Result.FDay := a.FDay + b;
+  Result.FDay := (Integer(a.FDay) - 1 + b mod 7) mod 7 + 1;
 end;
 
 class operator Chrono.TWeekday.Subtract(const a: Chrono.TWeekday; const b: Word): Chrono.TWeekday;
 begin
-  Result.FDay := a.FDay - b;
+  Result.FDay := (Integer(a.FDay) - 1 + 7 - b mod 7) mod 7 + 1;
 end;
 
 class operator Chrono.TWeekday.Subtract(const a, b: Chrono.TWeekday): Integer;
@@ -3222,7 +3639,7 @@ end;
 
 function Chrono.TWeekday.ToString: string;
 begin
-  Result := FormatSettings.LongDayNames[FDay];
+  Result := Chrono.FLocale.DayName(FDay);
 end;
 
 function Chrono.TWeekday.ShortName(const FormatSettings: TFormatSettings): string;
@@ -3232,7 +3649,7 @@ end;
 
 function Chrono.TWeekday.ShortName: string;
 begin
-  Result := FormatSettings.ShortDayNames[FDay];
+  Result := Chrono.FLocale.ShortDayName(FDay);
 end;
 
 function Chrono.TWeekday.LongName(const FormatSettings: TFormatSettings): string;
@@ -3242,18 +3659,19 @@ end;
 
 function Chrono.TWeekday.LongName: string;
 begin
-  Result := FormatSettings.LongDayNames[FDay];
+  Result := Chrono.FLocale.DayName(FDay);
 end;
 
 procedure Chrono.TWeekday.Parse(const Value: string; const FormatSettings: TFormatSettings);
 begin
   if not TryParse(Value, FormatSettings) then
-    raise EConvertError.CreateResFmt(@System.SysConst.SInvalidDate, [Value]);
+    raise EConvertError.CreateFmt(Chrono.FLocale.ErrorText(Chrono.TLocale.TError.InvalidWeekdayName), [Value]);
 end;
 
 procedure Chrono.TWeekday.Parse(const Value: string);
 begin
-  Parse(Value, FormatSettings);
+  if not TryParse(Value) then
+    raise EConvertError.CreateFmt(Chrono.FLocale.ErrorText(Chrono.TLocale.TError.InvalidWeekdayName), [Value]);
 end;
 
 function Chrono.TWeekday.TryParse(const Value: string; const FormatSettings: TFormatSettings): Boolean;
@@ -3278,45 +3696,55 @@ begin
 end;
 
 function Chrono.TWeekday.TryParse(const Value: string): Boolean;
+var
+  Locale: Chrono.TLocale;
+  I: Chrono.TWeekdayNum;
 begin
-  Result := TryParse(Value, FormatSettings)
+  Locale := Chrono.FLocale;
+  for I := Low(Chrono.TWeekdayNum) to High(Chrono.TWeekdayNum) do
+    if AnsiSameText(Value, Locale.DayName(I)) or AnsiSameText(Value, Locale.ShortDayName(I)) then
+    begin
+      FDay := I;
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 function Chrono.TWeekday.GetDay: TWeekdayNum;
 begin
-  Result := DaysOfWeekArray[Word(FirstDayOfWeek), FDay];
+  Result := Chrono.WeekdayIndex(FirstDayOfWeek.FDay, FDay);
 end;
 
 procedure Chrono.TWeekday.SetDay(const Value: TWeekdayNum);
 begin
-  FDay := WeekdaysArray[Word(FirstDayOfWeek), Value];
+  FDay := Chrono.WeekdayAt(FirstDayOfWeek.FDay, Value);
 end;
 
 function Chrono.TWeekday.GetDayOfWeek(const FirstDayOfWeek: Chrono.TWeekday): TWeekdayNum;
 begin
-  Result := DaysOfWeekArray[Word(FirstDayOfWeek), FDay];
+  Result := Chrono.WeekdayIndex(FirstDayOfWeek.FDay, FDay);
 end;
 
 procedure Chrono.TWeekday.SetDayOfWeek(const FirstDayOfWeek: Chrono.TWeekday; const Value: TWeekdayNum);
 begin
-  FDay := WeekdaysArray[Word(FirstDayOfWeek), Value];
+  FDay := Chrono.WeekdayAt(FirstDayOfWeek.FDay, Value);
 end;
 
-class operator Chrono.TWeekday.Implicit(const a: Chrono.TWeekday): TWeekdayNum;
+class operator Chrono.TWeekday.Explicit(const a: Chrono.TWeekday): TWeekdayNum;
 begin
   Result := a.FDay;
 end;
 
 class operator Chrono.TWeekday.Implicit(const a: TWeekdayNum): Chrono.TWeekday;
 begin
-  Result.FDay := a;
+  Result.FDay := Chrono.CheckedWeekday(a);
 end;
 
 { Chrono.TWeek.TEnumerator }
 
 function Chrono.TWeek.TEnumerator.GetCurrent: Chrono.TWeekday;
 begin
-  Result := WeekdaysArray[FFirstDayOfWeek.FDay, FCurrentIndex];
+  Result.FDay := Chrono.WeekdayAt(FFirstDayOfWeek.FDay, FCurrentIndex);
 end;
 
 function Chrono.TWeek.TEnumerator.MoveNext: Boolean;
@@ -3335,7 +3763,7 @@ end;
 
 function Chrono.TWeek.Get(const Index: TWeekdayNum): Chrono.TWeekday;
 begin
-  Result := WeekdaysArray[Word(FirstDayOfWeek), Index];
+  Result.FDay := Chrono.WeekdayAt(FFirstDayOfWeek.FDay, Index);
 end;
 
 function Chrono.TWeek.GetEnumerator: TEnumerator;
@@ -3369,20 +3797,20 @@ end;
 
 class operator Chrono.TYear.Explicit(const a: Chrono.TYear): string;
 begin
-  Result := IntToStr(a);
+  Result := IntToStr(a.FYear);
 end;
 
 class operator Chrono.TYear.Explicit(const a: string): Chrono.TYear;
 begin
-  Result.FYear := StrToInt(a);
+  Result.FYear := Chrono.CheckedYear(StrToInt(a));
 end;
 
 class operator Chrono.TYear.Implicit(const a: Word): Chrono.TYear;
 begin
-  Result.FYear := a;
+  Result.FYear := Chrono.CheckedYear(a);
 end;
 
-class operator Chrono.TYear.Implicit(const a: Chrono.TYear): Word;
+class operator Chrono.TYear.Explicit(const a: Chrono.TYear): Word;
 begin
   Result := a.FYear;
 end;
@@ -3419,38 +3847,37 @@ end;
 
 class operator Chrono.TYear.Add(const a: Chrono.TYear; const b: Word): Chrono.TYear;
 begin
-  Result.FYear := a.FYear + b;
+  Result.FYear := Chrono.CheckedYear(Integer(a.FYear) + b);
 end;
 
 class operator Chrono.TYear.Dec(const a: Chrono.TYear): Chrono.TYear;
 begin
-  Result.FYear := a.FYear - 1;
+  Result.FYear := Chrono.CheckedYear(Integer(a.FYear) - 1);
 end;
 
 class operator Chrono.TYear.Inc(const a: Chrono.TYear): Chrono.TYear;
 begin
-  Result.FYear := a.FYear + 1;
+  Result.FYear := Chrono.CheckedYear(Integer(a.FYear) + 1);
 end;
 
 class operator Chrono.TYear.IntDivide(const a: Chrono.TYear; const b: Word): Chrono.TYear;
 begin
-  Result.FYear := a.FYear div b;
+  Result.FYear := Chrono.CheckedYear(a.FYear div b);
 end;
 
 function Chrono.TYear.IsLeap: Boolean;
 begin
-  Result := YearIsLeap[FYear];
-//  Result := (FYear mod 4 = 0) and ((FYear mod 100 <> 0) or (FYear mod 400 = 0));
+  Result := Chrono.IsLeapYear(FYear);
 end;
 
 class operator Chrono.TYear.Multiply(const a: Chrono.TYear; const b: Word): Chrono.TYear;
 begin
-  Result.FYear := a.FYear * b;
+  Result.FYear := Chrono.CheckedYear(Integer(a.FYear) * b);
 end;
 
 class operator Chrono.TYear.Subtract(const a: Chrono.TYear; const b: Word): Chrono.TYear;
 begin
-  Result.FYear := a.FYear - b;
+  Result.FYear := Chrono.CheckedYear(Integer(a.FYear) - b);
 end;
 
 class operator Chrono.TYear.Subtract(const a, b: Chrono.TYear): Integer;
@@ -3503,8 +3930,8 @@ end;
 
 constructor Chrono.TQuarter.TSequence.Create(const First, Last: Chrono.TQuarter);
 begin
-  FFirst := First;
-  FLast := Last;
+  FFirst := First.FQuarter;
+  FLast := Last.FQuarter;
   FCount := FLast - FFirst + 1;
 end;
 
@@ -3542,7 +3969,7 @@ begin
     end;
   end;
 
-  raise EConvertError.CreateResFmt(@SInvalidQuarter, [a]);
+  raise EConvertError.CreateFmt(Chrono.FLocale.ErrorText(Chrono.TLocale.TError.InvalidQuarter), [a]);
 end;
 
 class operator Chrono.TQuarter.Explicit(const a: Chrono.TQuarter): string;
@@ -3550,22 +3977,22 @@ begin
   Result := Roman[a.FQuarter];
 end;
 
-class operator Chrono.TQuarter.Implicit(const a: Chrono.TQuarter): Word;
+class operator Chrono.TQuarter.Explicit(const a: Chrono.TQuarter): Word;
 begin
   Result := a.FQuarter;
 end;
 
 class operator Chrono.TQuarter.Implicit(const a: Word): Chrono.TQuarter;
 begin
-  Result.FQuarter := a;
+  Result.FQuarter := Chrono.CheckedQuarter(a);
 end;
 
 class operator Chrono.TQuarter.Implicit(const a: TQuarterNum): Chrono.TQuarter;
 begin
-  Result.FQuarter := a;
+  Result.FQuarter := Chrono.CheckedQuarter(a);
 end;
 
-class operator Chrono.TQuarter.Implicit(const a: Chrono.TQuarter): TQuarterNum;
+class operator Chrono.TQuarter.Explicit(const a: Chrono.TQuarter): TQuarterNum;
 begin
   Result := a.FQuarter;
 end;
@@ -3602,12 +4029,12 @@ end;
 
 class operator Chrono.TQuarter.Add(const a: Chrono.TQuarter; b: Word): Chrono.TQuarter;
 begin
-  Result.FQuarter := a.FQuarter + b;
+  Result.FQuarter := (Integer(a.FQuarter) - 1 + b mod 4) mod 4 + 1;
 end;
 
 class operator Chrono.TQuarter.Subtract(const a: Chrono.TQuarter; const b: Word): Chrono.TQuarter;
 begin
-  Result.FQuarter := a.FQuarter - b;
+  Result.FQuarter := (Integer(a.FQuarter) - 1 + 4 - b mod 4) mod 4 + 1;
 end;
 
 class operator Chrono.TQuarter.Subtract(const a, b: Chrono.TQuarter): Integer;
@@ -3629,12 +4056,12 @@ end;
 
 function Chrono.TQuarterHelper.First: TMonth;
 begin
-  Result.FMonth := QuarterFirstMonth[FQuarter];
+  Result.FMonth := 3 * FQuarter - 2;
 end;
 
 function Chrono.TQuarterHelper.Last: TMonth;
 begin
-  Result.FMonth := QuarterLastMonth[FQuarter];
+  Result.FMonth := 3 * FQuarter;
 end;
 
 function Chrono.TQuarterHelper.Months: TMonth.TSequence;
@@ -3663,13 +4090,14 @@ end;
 
 constructor Chrono.TQuarterOfYear.Create(const Year: Chrono.TYear; const Quarter: Chrono.TQuarter);
 begin
-  FYear := Year;
-  FQuarter := Quarter;
+  // The components may be uninitialized records, so check them here as well.
+  FYear.FYear := Chrono.CheckedYear(Year.FYear);
+  FQuarter.FQuarter := Chrono.CheckedQuarter(Quarter.FQuarter);
 end;
 
 constructor Chrono.TQuarterOfYear.Create(const Date: System.TDateTime);
 begin
-  Self := Chrono.TQuarterOfYear(Date);
+  Self := Chrono.TDate.FromDateTime(Date).QuarterOfYear;
 end;
 
 class function Chrono.TQuarterOfYear.Current: Chrono.TQuarterOfYear;
@@ -3679,7 +4107,7 @@ end;
 
 class operator Chrono.TQuarterOfYear.Explicit(const a: System.TDateTime): Chrono.TQuarterOfYear;
 begin
-  Result := Chrono.TDate(a).QuarterOfYear;
+  Result := Chrono.TDate.FromDateTime(a).QuarterOfYear;
 end;
 
 class operator Chrono.TQuarterOfYear.Equal(const a, b: Chrono.TQuarterOfYear): Boolean;
@@ -3744,30 +4172,31 @@ end;
 
 procedure Chrono.TQuarterOfYear.SetIndex(const Value: Integer);
 begin
-  FYear.FYear := Value div 4;
+  // The year check also rejects negative indexes (their year is 0 or less).
+  FYear.FYear := Chrono.CheckedYear(Value div 4);
   FQuarter.FQuarter := (Value mod 4) + 1;
 end;
 
 procedure Chrono.TQuarterOfYear.SetQuarter(const Value: Chrono.TQuarter);
 begin
-  FQuarter := Value;
+  FQuarter.FQuarter := Chrono.CheckedQuarter(Value.FQuarter);
 end;
 
 procedure Chrono.TQuarterOfYear.SetYear(const Value: Chrono.TYear);
 begin
-  FYear := Value;
+  FYear.FYear := Chrono.CheckedYear(Value.FYear);
 end;
 
 { Chrono.TQuarterOfYearHelper }
 
 function Chrono.TQuarterOfYearHelper.First: Chrono.TMonthOfYear;
 begin
-  Result := Chrono.TMonthOfYear.Create(Year, QuarterFirstMonth[FQuarter.FQuarter]);
+  Result := Chrono.TMonthOfYear.Create(Year, 3 * FQuarter.FQuarter - 2);
 end;
 
 function Chrono.TQuarterOfYearHelper.Last: Chrono.TMonthOfYear;
 begin
-  Result := Chrono.TMonthOfYear.Create(Year, QuarterLastMonth[FQuarter.FQuarter]);
+  Result := Chrono.TMonthOfYear.Create(Year, 3 * FQuarter.FQuarter);
 end;
 
 function Chrono.TQuarterOfYearHelper.Dates: Chrono.TDate.TSequence;
@@ -3803,8 +4232,8 @@ end;
 
 constructor Chrono.TMonth.TSequence.Create(const First, Last: TMonth);
 begin
-  FFirst := First;
-  FLast := Last;
+  FFirst := First.FMonth;
+  FLast := Last.FMonth;
   FCount := FLast - FFirst + 1;
 end;
 
@@ -3817,12 +4246,12 @@ end;
 
 class operator Chrono.TMonth.Add(const a: Chrono.TMonth; b: Word): Chrono.TMonth;
 begin
-  Result.FMonth := a.FMonth + b;
+  Result.FMonth := (Integer(a.FMonth) - 1 + b mod 12) mod 12 + 1;
 end;
 
 class operator Chrono.TMonth.Subtract(const a: Chrono.TMonth; const b: Word): Chrono.TMonth;
 begin
-  Result.FMonth := a.FMonth - b;
+  Result.FMonth := (Integer(a.FMonth) - 1 + 12 - b mod 12) mod 12 + 1;
 end;
 
 class operator Chrono.TMonth.Subtract(const a, b: Chrono.TMonth): Integer;
@@ -3832,32 +4261,24 @@ end;
 
 class operator Chrono.TMonth.Explicit(const a: Chrono.TMonth): string;
 begin
-  Result := FormatSettings.LongMonthNames[a.FMonth];
+  Result := Chrono.FLocale.MonthName(a.FMonth);
 end;
 
 class operator Chrono.TMonth.Explicit(const a: string): Chrono.TMonth;
 var
-  I: Word;
+  Locale: Chrono.TLocale;
+  I: Chrono.TMonthNum;
 begin
-  for I in [1..12] do
-  begin
-    if AnsiSameText(FormatSettings.LongMonthNames[I], a) then
+  Locale := Chrono.FLocale;
+  for I := Low(Chrono.TMonthNum) to High(Chrono.TMonthNum) do
+    if AnsiSameText(Locale.MonthName(I), a) or AnsiSameText(Locale.GenitiveMonthName(I), a)
+      or AnsiSameText(Locale.ShortMonthName(I), a) then
     begin
       Result.FMonth := I;
       Exit;
     end;
-  end;
 
-  for I in [1..12] do
-  begin
-    if AnsiSameText(FormatSettings.ShortMonthNames[I], a) then
-    begin
-      Result.FMonth := I;
-      Exit;
-    end;
-  end;
-
-  raise EConvertError.Create('Invalid month name "' + a + '"');
+  raise EConvertError.CreateFmt(Locale.ErrorText(Chrono.TLocale.TError.InvalidMonthName), [a]);
 end;
 
 class operator Chrono.TMonth.Equal(const a, b: Chrono.TMonth): Boolean;
@@ -3890,24 +4311,24 @@ begin
   Result := a.FMonth <> b.FMonth;
 end;
 
-class operator Chrono.TMonth.Implicit(const a: Chrono.TMonth): TMonthNum;
+class operator Chrono.TMonth.Explicit(const a: Chrono.TMonth): TMonthNum;
 begin
   Result := a.FMonth;
 end;
 
-class operator Chrono.TMonth.Implicit(const a: Chrono.TMonth): Word;
+class operator Chrono.TMonth.Explicit(const a: Chrono.TMonth): Word;
 begin
   Result := a.FMonth;
 end;
 
 class operator Chrono.TMonth.Implicit(const a: Word): Chrono.TMonth;
 begin
-  Result.FMonth := a;
+  Result.FMonth := Chrono.CheckedMonth(a);
 end;
 
 function Chrono.TMonth.ToString: string;
 begin
-  Result := FormatSettings.LongMonthNames[FMonth];
+  Result := Chrono.FLocale.MonthName(FMonth);
 end;
 
 function Chrono.TMonth.ToString(const FormatSettings: TFormatSettings): string;
@@ -3918,9 +4339,9 @@ end;
 function Chrono.TMonth.ToString(Short: Boolean): string;
 begin
   if Short then
-    Result := FormatSettings.ShortMonthNames[FMonth]
+    Result := Chrono.FLocale.ShortMonthName(FMonth)
   else
-    Result := FormatSettings.LongMonthNames[FMonth];
+    Result := Chrono.FLocale.MonthName(FMonth);
 end;
 
 function Chrono.TMonth.ToString(Short: Boolean; const FormatSettings: TFormatSettings): string;
@@ -3933,25 +4354,19 @@ end;
 
 function Chrono.TMonth.Days(const Year: Chrono.TYear): TDays;
 begin
-  Result := MonthDays[Year.IsLeap, FMonth];
+  Result := Chrono.DaysInMonth(Year.FYear, Chrono.CheckedMonth(FMonth));
 end;
 
 { Chrono.TMonthHelper }
 
 function Chrono.TMonthHelper.First(const Year: Chrono.TYear): Chrono.TDate;
 begin
-  Result.Encode(Year, FMonth);
+  Result.Encode(Integer(Year.FYear), Integer(FMonth), 1);
 end;
 
 function Chrono.TMonthHelper.Last(const Year: Chrono.TYear): Chrono.TDate;
 begin
-  if FMonth = 12 then
-    Result.Encode(Year.FYear, 12, 31)
-  else
-  begin
-    Result.Encode(Year.FYear, FMonth + 1, 1);
-    Dec(Result.FDate);
-  end;
+  Result.Encode(Integer(Year.FYear), Integer(FMonth), Integer(Days(Year)));
 end;
 
 function Chrono.TMonthHelper.Sequence(const Year: Chrono.TYear): Chrono.TDate.TSequence;
@@ -3973,15 +4388,15 @@ end;
 
 class operator Chrono.TDay.Explicit(const a: string): Chrono.TDay;
 begin
-  Result.FDay := StrToInt(a);
+  Result.FDay := Chrono.CheckedDay(StrToInt(a));
 end;
 
 class operator Chrono.TDay.Implicit(const a: Word): Chrono.TDay;
 begin
-  Result.FDay := a;
+  Result.FDay := Chrono.CheckedDay(a);
 end;
 
-class operator Chrono.TDay.Implicit(const a: Chrono.TDay): Word;
+class operator Chrono.TDay.Explicit(const a: Chrono.TDay): Word;
 begin
   Result := a.FDay;
 end;
@@ -4018,12 +4433,12 @@ end;
 
 class operator Chrono.TDay.Add(const a: Chrono.TDay; const b: Word): Chrono.TDay;
 begin
-  Result.FDay := a.FDay + b;
+  Result.FDay := Chrono.CheckedDay(Integer(a.FDay) + b);
 end;
 
 class operator Chrono.TDay.Subtract(const a: Chrono.TDay; const b: Word): Chrono.TDay;
 begin
-  Result.FDay := a.FDay - b;
+  Result.FDay := Chrono.CheckedDay(Integer(a.FDay) - b);
 end;
 
 function Chrono.TDay.ToString: string;
@@ -4033,22 +4448,22 @@ end;
 
 class operator Chrono.TDay.IntDivide(const a: Chrono.TDay; const b: Word): Chrono.TDay;
 begin
-  Result.FDay := a.FDay div b;
+  Result.FDay := Chrono.CheckedDay(a.FDay div b);
 end;
 
 class operator Chrono.TDay.Multiply(const a: Chrono.TDay; const b: Word): Chrono.TDay;
 begin
-  Result.FDay := a.FDay * b;
+  Result.FDay := Chrono.CheckedDay(Integer(a.FDay) * b);
 end;
 
 class operator Chrono.TDay.Dec(const a: Chrono.TDay): Chrono.TDay;
 begin
-  Result.FDay := a.FDay - 1;
+  Result.FDay := Chrono.CheckedDay(Integer(a.FDay) - 1);
 end;
 
 class operator Chrono.TDay.Inc(const a: Chrono.TDay): Chrono.TDay;
 begin
-  Result.FDay := a.FDay + 1;
+  Result.FDay := Chrono.CheckedDay(Integer(a.FDay) + 1);
 end;
 
 { Chrono.TDateTime }
@@ -4062,7 +4477,7 @@ end;
 constructor Chrono.TDateTime.Create(const Value: Chrono.TDate);
 begin
   FDate := Value;
-  FTime := Chrono.TTime.Now;
+  FTime.FTime := 0;
 end;
 
 constructor Chrono.TDateTime.Create(const Value: Chrono.TTime);
@@ -4079,14 +4494,19 @@ end;
 
 constructor Chrono.TDateTime.Create(const Value: System.TDateTime);
 begin
-  FDate := Value;
-  FTime := Value;
+  Self := Value;
 end;
 
 class operator Chrono.TDateTime.Implicit(const a: System.TDateTime): Chrono.TDateTime;
+var
+  Stamp: TTimeStamp;
 begin
-  Result.Date := a;
-  Result.Time := a;
+  // DateTimeToTimeStamp rounds the whole value to milliseconds before splitting
+  // it, so a value a fraction of a millisecond before midnight becomes 00:00 of
+  // the NEXT day instead of 00:00 of the same day.
+  Stamp := DateTimeToTimeStamp(a);
+  Result.FDate := Chrono.TDate.FromStamp(Stamp.Date);
+  Result.FTime.FTime := Stamp.Time;
 end;
 
 class operator Chrono.TDateTime.Implicit(const a: Chrono.TDateTime): System.TDateTime;
@@ -4179,9 +4599,9 @@ end;
 class operator Chrono.TDateTime.Implicit(const a: TTimeStamp): Chrono.TDateTime;
 begin
   // TTimeStamp stores the same day number and the same milliseconds as the
-  // fields; the explicit casts select Explicit(Integer), not Implicit(System.TDateTime).
-  Result.FDate := Chrono.TDate(a.Date);
-  Result.FTime := Chrono.TTime(a.Time);
+  // fields, so they are only range-checked.
+  Result.FDate := Chrono.TDate.FromStamp(a.Date);
+  Result.FTime := Chrono.TTime.FromMSecs(a.Time);
 end;
 
 class operator Chrono.TDateTime.Implicit(const a: Chrono.TDateTime): TTimeStamp;
@@ -4191,7 +4611,7 @@ begin
   Result.Time := Integer(a.FTime);
 end;
 
-class operator Chrono.TDateTime.Implicit(const a: Chrono.TDateTime): Variant;
+class operator Chrono.TDateTime.Explicit(const a: Chrono.TDateTime): Variant;
 begin
   Result := TimeStampToDateTime(TTimeStamp(a));
 end;
@@ -4205,11 +4625,11 @@ begin
   // Add the duration to the time of day (in ms) and carry whole days over to
   // the date — this handles crossing midnight correctly in both directions.
   TotalMSec := Integer(A.Time) + B.TotalMilliseconds;
-  DaysDelta := Integer(TotalMSec div IMSecsPerDay);
-  NewTimeMSec := TotalMSec mod IMSecsPerDay;
+  DaysDelta := Integer(TotalMSec div MSecsPerDay);
+  NewTimeMSec := TotalMSec mod MSecsPerDay;
   if NewTimeMSec < 0 then
   begin
-    Inc(NewTimeMSec, IMSecsPerDay);
+    Inc(NewTimeMSec, MSecsPerDay);
     Dec(DaysDelta);
   end;
 
@@ -4241,6 +4661,12 @@ begin
   Result.Time := A.Time;
 end;
 
+class function Chrono.TDateTime.Zero: Chrono.TDateTime;
+begin
+  Result.FDate.FDate := 0;
+  Result.FTime.FTime := 0;
+end;
+
 class function Chrono.TDateTime.Now: Chrono.TDateTime;
 {$IFDEF MSWINDOWS}
 var
@@ -4267,7 +4693,7 @@ end;
 
 function Chrono.TDateTime.ToString: string;
 begin
-  Result := DateTimeToStr(Self);
+  Result := DateTimeToStr(Self, Chrono.FLocale.Apply(FormatSettings, 'c'));
 end;
 
 function Chrono.TDateTime.ToString(const FormatSettings: TFormatSettings): string;
@@ -4277,7 +4703,7 @@ end;
 
 function Chrono.TDateTime.Format(const Format: string): string;
 begin
-  Result := FormatDateTime(Format, Self);
+  Result := FormatDateTime(Format, Self, Chrono.FLocale.Apply(FormatSettings, Format));
 end;
 
 function Chrono.TDateTime.Format(const Format: string; const FormatSettings: TFormatSettings): string;
@@ -4344,7 +4770,7 @@ end;
 function Chrono.TDateTime.EndOfDay: Chrono.TDateTime;
 begin
   Result.Date := Self.Date;
-  Result.Time := Chrono.TTime(IMSecsPerDay - 1); // 23:59:59.999
+  Result.Time := Chrono.TTime(MSecsPerDay - 1); // 23:59:59.999
 end;
 
 function Chrono.TDateTime.Plus(const D: Chrono.TDuration): Chrono.TDateTime;
@@ -4441,13 +4867,14 @@ end;
 
 constructor Chrono.TMonthOfYear.Create(const Year: Chrono.TYear; const Month: Chrono.TMonth);
 begin
-  FYear := Year;
-  FMonth := Month;
+  // The components may be uninitialized records, so check them here as well.
+  FYear.FYear := Chrono.CheckedYear(Year.FYear);
+  FMonth.FMonth := Chrono.CheckedMonth(Month.FMonth);
 end;
 
 constructor Chrono.TMonthOfYear.Create(const Date: System.TDateTime);
 begin
-  Self := TMonthOfYear(Date);
+  Self := Chrono.TDate.FromDateTime(Date).MonthOfYear;
 end;
 
 class function Chrono.TMonthOfYear.Current: TMonthOfYear;
@@ -4455,19 +4882,19 @@ begin
   Result := Chrono.TDate.Today.MonthOfYear;
 end;
 
-class operator Chrono.TMonthOfYear.Implicit(const a: TMonthOfYear): Chrono.TMonth;
+class operator Chrono.TMonthOfYear.Explicit(const a: TMonthOfYear): Chrono.TMonth;
 begin
   Result := a.FMonth;
 end;
 
-class operator Chrono.TMonthOfYear.Implicit(const a: Chrono.TMonthOfYear): TMonthNum;
+class operator Chrono.TMonthOfYear.Explicit(const a: Chrono.TMonthOfYear): TMonthNum;
 begin
-  Result := a.Month;
+  Result := a.FMonth.FMonth;
 end;
 
 class operator Chrono.TMonthOfYear.Explicit(const a: System.TDateTime): Chrono.TMonthOfYear;
 begin
-  Result := Chrono.TDate(a).MonthOfYear;
+  Result := Chrono.TDate.FromDateTime(a).MonthOfYear;
 end;
 
 class operator Chrono.TMonthOfYear.Equal(const a, b: Chrono.TMonthOfYear): Boolean;
@@ -4547,18 +4974,19 @@ end;
 
 procedure Chrono.TMonthOfYear.SetIndex(const Value: Integer);
 begin
-  FYear := Value div 12;
-  FMonth := (Value mod 12) + 1;
+  // The year check also rejects negative indexes (their year is 0 or less).
+  FYear.FYear := Chrono.CheckedYear(Value div 12);
+  FMonth.FMonth := (Value mod 12) + 1;
 end;
 
 procedure Chrono.TMonthOfYear.SetMonth(const Value: Chrono.TMonth);
 begin
-  FMonth := Value;
+  FMonth.FMonth := Chrono.CheckedMonth(Value.FMonth);
 end;
 
 procedure Chrono.TMonthOfYear.SetYear(const Value: Chrono.TYear);
 begin
-  FYear := Value;
+  FYear.FYear := Chrono.CheckedYear(Value.FYear);
 end;
 
 { Chrono.TMonthOfYearHelper }
@@ -4570,7 +4998,7 @@ end;
 
 function Chrono.TMonthOfYearHelper.Last: Chrono.TDate;
 begin
-  Result.Encode(Word(Year), Word(Month), MonthDayCount[Year.IsLeap, Word(Month)]);
+  Result.Encode(Word(Year), Word(Month), Chrono.DaysInMonth(Word(Year), Word(Month)));
 end;
 
 function Chrono.TMonthOfYearHelper.Dates: Chrono.TDate.TSequence;
@@ -4634,13 +5062,105 @@ begin
 end;
 
 procedure Chrono.TDayOfMonth.SetDay(const Value: Chrono.TDay);
+var
+  MaxDay: Integer;
 begin
+  // Without a year the longest variant of the month counts (February 29 is
+  // allowed), so take any leap year.
+  if (FMonth.FMonth >= 1) and (FMonth.FMonth <= 12) then
+    MaxDay := Chrono.DaysInMonth(2000, FMonth.FMonth)
+  else
+    MaxDay := 31;
+  if (Value.FDay < 1) or (Value.FDay > MaxDay) then
+    Chrono.ErrorDay(Value.FDay);
   FDay := Value;
 end;
 
 procedure Chrono.TDayOfMonth.SetMonth(const Value: Chrono.TMonth);
+var
+  MaxDay: Word;
 begin
-  FMonth := Value;
+  FMonth.FMonth := Chrono.CheckedMonth(Value.FMonth);
+  MaxDay := Chrono.DaysInMonth(2000, FMonth.FMonth); // a leap year: the longest variant
+  if FDay.FDay > MaxDay then
+    FDay.FDay := MaxDay;
+end;
+
+{ Chrono.TDateFlags }
+
+function Chrono.TDateFlags.Find(const Key: Integer; out Index: Integer): Boolean;
+var
+  Base, Size, Half: Integer;
+begin
+  if FCount = 0 then
+  begin
+    Index := 0;
+    Exit(False);
+  end;
+  // A binary search that adds the result of each comparison instead of
+  // branching on it: with random dates every branch would be a coin toss for
+  // the processor, and the mispredictions would cost more than the search.
+  Base := 0;
+  Size := FCount;
+  while Size > 1 do
+  begin
+    Half := Size shr 1;
+    Inc(Base, Half * Ord(FEntries[Base + Half].Key < Key));
+    Dec(Size, Half);
+  end;
+  Inc(Base, Ord(FEntries[Base].Key < Key)); // the first entry with a key >= Key
+  Index := Base;
+  Result := (Base < FCount) and (FEntries[Base].Key = Key);
+end;
+
+function Chrono.TDateFlags.TryGetValue(const Key: Integer; out Value: Boolean): Boolean;
+var
+  Index: Integer;
+begin
+  Result := Find(Key, Index);
+  Value := Result and FEntries[Index].Value;
+end;
+
+procedure Chrono.TDateFlags.AddOrSetValue(const Key: Integer; const Value: Boolean);
+var
+  Index: Integer;
+begin
+  if not Find(Key, Index) then
+  begin
+    if FCount = Length(FEntries) then
+      SetLength(FEntries, 2 * FCount + 8);
+    // TEntry holds no managed fields, so the tail can be moved as raw memory.
+    if Index < FCount then
+      Move(FEntries[Index], FEntries[Index + 1], (FCount - Index) * SizeOf(TEntry));
+    FEntries[Index].Key := Key;
+    Inc(FCount);
+  end;
+  FEntries[Index].Value := Value;
+end;
+
+function Chrono.TDateFlags.ContainsKey(const Key: Integer): Boolean;
+var
+  Index: Integer;
+begin
+  Result := Find(Key, Index);
+end;
+
+procedure Chrono.TDateFlags.Remove(const Key: Integer);
+var
+  Index: Integer;
+begin
+  if Find(Key, Index) then
+  begin
+    Dec(FCount);
+    if Index < FCount then
+      Move(FEntries[Index + 1], FEntries[Index], (FCount - Index) * SizeOf(TEntry));
+  end;
+end;
+
+procedure Chrono.TDateFlags.Clear;
+begin
+  FEntries := nil;
+  FCount := 0;
 end;
 
 { Chrono.TBasicCalendar }
@@ -4648,8 +5168,8 @@ end;
 constructor Chrono.TBasicCalendar.Create;
 begin
   inherited;
-  FHolidays := TDictionary<Integer, Boolean>.Create;
-  FWorkDays := TDictionary<Integer, Boolean>.Create;
+  FHolidays := TDateFlags.Create;
+  FWorkDays := TDateFlags.Create;
 end;
 
 destructor Chrono.TBasicCalendar.Destroy;
@@ -4693,115 +5213,280 @@ begin
 end;
 
 function Chrono.TBasicCalendar.IsWeekEnd(const Date: Chrono.TDate): Boolean;
+var
+  Day: Chrono.TWeekday;
 begin
-  Result := Date.Weekday in [1, 7];
+  Day := Date.Weekday;
+  Result := (Day = Chrono.Saturday) or (Day = Chrono.Sunday);
 end;
 
-// ISO 639 language code of the current thread locale in lower case, or 'en'
-// if it cannot be determined. Only the Windows implementation asks the OS.
-function GetThreadLocaleISO639LanguageName: string;
-{$IFDEF MSWINDOWS}
-var
-  Buffer: array[0..8] of Char;
-  Len: Integer;
+{ Chrono.TLocale }
+
+// The English text of a TLocale by its index (see MonthTextIndex and the others).
+function EnglishText(const Index: Integer): string;
 begin
-  Len := GetLocaleInfo(GetThreadLocale, LOCALE_SISO639LANGNAME, Buffer, Length(Buffer));
-  if Len > 0 then
-    Result := LowerCase(Buffer)
+  case Index of
+    MonthTextIndex..GenitiveTextIndex - 1:
+      Result := EnglishMonths[Index - MonthTextIndex + 1];
+    GenitiveTextIndex..ShortMonthTextIndex - 1:
+      Result := EnglishMonths[Index - GenitiveTextIndex + 1];
+    ShortMonthTextIndex..DayTextIndex - 1:
+      Result := EnglishShortMonths[Index - ShortMonthTextIndex + 1];
+    DayTextIndex..ShortDayTextIndex - 1:
+      Result := EnglishDays[Index - DayTextIndex + 1];
+    ShortDayTextIndex..DatePartTextIndex - 1:
+      Result := EnglishShortDays[Index - ShortDayTextIndex + 1];
+    DatePartTextIndex..ShortDatePartTextIndex - 1:
+      Result := EnglishDateParts[Chrono.TDatePart(Index - DatePartTextIndex)];
+    ShortDatePartTextIndex..TimePartTextIndex - 1:
+      Result := EnglishShortDateParts[Chrono.TDatePart(Index - ShortDatePartTextIndex)];
+    TimePartTextIndex..ShortTimePartTextIndex - 1:
+      Result := EnglishTimeParts[Chrono.TTimePart(Index - TimePartTextIndex)];
+    ShortTimePartTextIndex..ErrorTextIndex - 1:
+      Result := EnglishShortTimeParts[Chrono.TTimePart(Index - ShortTimePartTextIndex)];
   else
-    Result := 'en';
+    Result := EnglishErrors[Chrono.TLocale.TError(Index - ErrorTextIndex)];
+  end;
 end;
-{$ELSE}
-begin
-  Result := 'en';
-end;
-{$ENDIF}
 
-procedure Localize;
+// The conversion types of the Format arguments of S, sorted: 'dds' for "%d of %s at %d".
+// A translated error message must take the same arguments as the English one, otherwise
+// raising the error would fail inside Format.
+function FormatArguments(const S: string): string;
 var
-  Previous: Integer;
+  I, J: Integer;
+  C: Char;
 begin
-  // Fast path: if already initialized, exit right away.
-  // TInterlocked.CompareExchange with Done/Done is used as an atomic read with
-  // a full barrier: even this "plain read" of the state goes through the
-  // Interlocked API rather than a direct load, so the array writes made by the
-  // initializing thread are guaranteed to be visible after it.
-  if TInterlocked.CompareExchange(gLocalizeState, Ord(TLocalizeState.Done), Ord(TLocalizeState.Done)) = Ord(TLocalizeState.Done) then
-    Exit;
-
-  // CAS: try to move Idle(0) -> Initializing(1). It returns the PREVIOUS
-  // value (the same semantics as Win32 InterlockedCompareExchange) —
-  // if Previous = Idle, THIS thread won the race and must perform the
-  // initialization.
-  Previous := TInterlocked.CompareExchange(gLocalizeState, Ord(TLocalizeState.Initializing), Ord(TLocalizeState.Idle));
-
-  if Previous = Ord(TLocalizeState.Idle) then
+  Result := '';
+  I := 1;
+  while I <= Length(S) do
   begin
-    var Lang := GetThreadLocaleISO639LanguageName;
-    if Lang = 'ru' then
+    if S[I] = '%' then
     begin
-      gLocalizedDatePart[Chrono.TDatePart.Year] := LoadResString(@SYear_ru);
-      gLocalizedDatePart[Chrono.TDatePart.Quarter] := LoadResString(@SQuarter_ru);
-      gLocalizedDatePart[Chrono.TDatePart.Month] := LoadResString(@SMonth_ru);
-      gLocalizedDatePart[Chrono.TDatePart.Week] := LoadResString(@SWeek_ru);
-      gLocalizedDatePart[Chrono.TDatePart.Day] := LoadResString(@SDay_ru);
-      gLocalizedDatePartShort[Chrono.TDatePart.Year] := LoadResString(@SYearShort_ru);
-      gLocalizedDatePartShort[Chrono.TDatePart.Quarter] := LoadResString(@SQuarterShort_ru);
-      gLocalizedDatePartShort[Chrono.TDatePart.Month] := LoadResString(@SMonthShort_ru);
-      gLocalizedDatePartShort[Chrono.TDatePart.Week] := LoadResString(@SWeekShort_ru);
-      gLocalizedDatePartShort[Chrono.TDatePart.Day] := LoadResString(@SDayShort_ru);
-      gLocalizedTimePart[Chrono.TTimePart.Hour] := LoadResString(@SHour_ru);
-      gLocalizedTimePart[Chrono.TTimePart.Minute] := LoadResString(@SMinute_ru);
-      gLocalizedTimePart[Chrono.TTimePart.Second] := LoadResString(@SSecond_ru);
-      gLocalizedTimePart[Chrono.TTimePart.Millisecond] := LoadResString(@SMillis_ru);
-      gLocalizedTimePart[Chrono.TTimePart.Microsecond] := LoadResString(@SMicros_ru);
-      gLocalizedTimePart[Chrono.TTimePart.Nanosecond] := LoadResString(@SNanos_ru);
-      gLocalizedTimePartShort[Chrono.TTimePart.Hour] := LoadResString(@SHourShort_ru);
-      gLocalizedTimePartShort[Chrono.TTimePart.Minute] := LoadResString(@SMinuteShort_ru);
-      gLocalizedTimePartShort[Chrono.TTimePart.Second] := LoadResString(@SSecondShort_ru);
-      gLocalizedTimePartShort[Chrono.TTimePart.Millisecond] := LoadResString(@SMillisShort_ru);
-      gLocalizedTimePartShort[Chrono.TTimePart.Microsecond] := LoadResString(@SMicrosShort_ru);
-      gLocalizedTimePartShort[Chrono.TTimePart.Nanosecond] := LoadResString(@SNanosShort_ru);
-    end
-    else
-    begin
-      gLocalizedDatePart[Chrono.TDatePart.Year] := LoadResString(@SYear);
-      gLocalizedDatePart[Chrono.TDatePart.Quarter] := LoadResString(@SQuarter);
-      gLocalizedDatePart[Chrono.TDatePart.Month] := LoadResString(@SMonth);
-      gLocalizedDatePart[Chrono.TDatePart.Week] := LoadResString(@SWeek);
-      gLocalizedDatePart[Chrono.TDatePart.Day] := LoadResString(@SDay);
-      gLocalizedDatePartShort[Chrono.TDatePart.Year] := LoadResString(@SYearShort);
-      gLocalizedDatePartShort[Chrono.TDatePart.Quarter] := LoadResString(@SQuarterShort);
-      gLocalizedDatePartShort[Chrono.TDatePart.Month] := LoadResString(@SMonthShort);
-      gLocalizedDatePartShort[Chrono.TDatePart.Week] := LoadResString(@SWeekShort);
-      gLocalizedDatePartShort[Chrono.TDatePart.Day] := LoadResString(@SDayShort);
-      gLocalizedTimePart[Chrono.TTimePart.Hour] := LoadResString(@SHour);
-      gLocalizedTimePart[Chrono.TTimePart.Minute] := LoadResString(@SMinute);
-      gLocalizedTimePart[Chrono.TTimePart.Second] := LoadResString(@SSecond);
-      gLocalizedTimePart[Chrono.TTimePart.Millisecond] := LoadResString(@SMillis);
-      gLocalizedTimePart[Chrono.TTimePart.Microsecond] := LoadResString(@SMicros);
-      gLocalizedTimePart[Chrono.TTimePart.Nanosecond] := LoadResString(@SNanos);
-      gLocalizedTimePartShort[Chrono.TTimePart.Hour] := LoadResString(@SHourShort);
-      gLocalizedTimePartShort[Chrono.TTimePart.Minute] := LoadResString(@SMinuteShort);
-      gLocalizedTimePartShort[Chrono.TTimePart.Second] := LoadResString(@SSecondShort);
-      gLocalizedTimePartShort[Chrono.TTimePart.Millisecond] := LoadResString(@SMillisShort);
-      gLocalizedTimePartShort[Chrono.TTimePart.Microsecond] := LoadResString(@SMicrosShort);
-      gLocalizedTimePartShort[Chrono.TTimePart.Nanosecond] := LoadResString(@SNanosShort);
+      Inc(I);
+      if (I <= Length(S)) and (S[I] <> '%') then
+      begin
+        while (I <= Length(S)) and CharInSet(S[I], ['0'..'9', ':', '-', '.', '*']) do
+          Inc(I);
+        if I <= Length(S) then
+        begin
+          C := S[I];
+          if CharInSet(C, ['A'..'Z']) then
+            C := Char(Ord(C) + Ord('a') - Ord('A'));
+          J := 1;
+          while (J <= Length(Result)) and (Result[J] <= C) do
+            Inc(J);
+          Insert(C, Result, J);
+        end;
+      end;
     end;
-    // The final atomic write of Done(2) is what "publishes" all the preceding
-    // array writes to other threads (release semantics, as in the classic
-    // lazy singleton initialization pattern).
-    TInterlocked.Exchange(gLocalizeState, Ord(TLocalizeState.Done));
-  end
-  else
+    Inc(I);
+  end;
+end;
+
+// True if the date format Format puts a day number (d, dd) next to a full month name
+// (mmmm). Then the month name is genitive, as Windows decides it: "d mmmm yyyy" gives
+// "27 октября 2026", "mmmm yyyy" gives "Октябрь 2026". The specifiers ddddd, dddddd and c
+// stand for the short and long date formats of FormatSettings and are checked in their place.
+function NeedsGenitive(const Format: string; const FormatSettings: TFormatSettings;
+  const Nested: Boolean = False): Boolean;
+var
+  I, Run: Integer;
+  C, Quote: Char;
+  HasDay, HasMonthName: Boolean;
+begin
+  HasDay := False;
+  HasMonthName := False;
+  I := 1;
+  while I <= Length(Format) do
   begin
-    // Threads that lost the CAS: another thread is either initializing
-    // (Previous=1) or has just finished (Previous=2 — possible if it completed
-    // between our fast-path check and the CAS). Either way, wait for Done
-    // WITHOUT reading the arrays before that, so as not to see data partially
-    // filled by the other thread.
-    while TInterlocked.CompareExchange(gLocalizeState, Ord(TLocalizeState.Done), Ord(TLocalizeState.Done)) <> Ord(TLocalizeState.Done) do
-      TThread.Yield; // give up the time slice instead of spinning at 100% CPU
+    C := Format[I];
+    if (C = '''') or (C = '"') then
+    begin
+      Quote := C;
+      Inc(I);
+      while (I <= Length(Format)) and (Format[I] <> Quote) do
+        Inc(I);
+      Inc(I);
+      Continue;
+    end;
+    C := UpCase(C);
+    Run := 1;
+    while (I + Run <= Length(Format)) and (UpCase(Format[I + Run]) = C) do
+      Inc(Run);
+    case C of
+      'D':
+        case Run of
+          1, 2:
+            HasDay := True;
+          5:
+            if not Nested and NeedsGenitive(FormatSettings.ShortDateFormat, FormatSettings, True) then
+              Exit(True);
+          6:
+            if not Nested and NeedsGenitive(FormatSettings.LongDateFormat, FormatSettings, True) then
+              Exit(True);
+        end;
+      'M':
+        if Run >= 4 then
+          HasMonthName := True;
+      'C':
+        if not Nested and NeedsGenitive(FormatSettings.ShortDateFormat, FormatSettings, True) then
+          Exit(True);
+    end;
+    Inc(I, Run);
+  end;
+  Result := HasDay and HasMonthName;
+end;
+
+constructor Chrono.TLocale.Create(const Name: string; const Base: TLocale; const Lookup: TFunc<string, string>);
+var
+  AllKeys: TArray<string>;
+  I: Integer;
+  Fallback, Value: string;
+begin
+  inherited Create;
+  FName := Name;
+  AllKeys := Keys;
+  SetLength(FTexts, TextCount);
+  for I := 0 to TextCount - 1 do
+  begin
+    if Base <> nil then
+      Fallback := Base.Text(I)
+    else
+      Fallback := EnglishText(I);
+    Value := '';
+    if Assigned(Lookup) then
+      Value := Lookup(AllKeys[I]);
+    if (Value = '') or ((I >= ErrorTextIndex) and (FormatArguments(Value) <> FormatArguments(Fallback))) then
+      Value := Fallback;
+    FTexts[I] := Value;
+  end;
+end;
+
+destructor Chrono.TLocale.Destroy;
+begin
+  if Chrono.FLocale = Self then
+    Chrono.FLocale := FSystem;
+  inherited;
+end;
+
+class function Chrono.TLocale.Keys: TArray<string>;
+var
+  Month: TMonthNum;
+  Day: TWeekdayNum;
+  DatePart: TDatePart;
+  TimePart: TTimePart;
+  Error: TError;
+begin
+  SetLength(Result, TextCount);
+  for Month := Low(TMonthNum) to High(TMonthNum) do
+  begin
+    Result[MonthTextIndex + Month - 1] := 'month.' + MonthKeys[Month];
+    Result[GenitiveTextIndex + Month - 1] := 'month.' + MonthKeys[Month] + '.genitive';
+    Result[ShortMonthTextIndex + Month - 1] := 'month.' + MonthKeys[Month] + '.short';
+  end;
+  for Day := Low(TWeekdayNum) to High(TWeekdayNum) do
+  begin
+    Result[DayTextIndex + Day - 1] := 'weekday.' + DayKeys[Day];
+    Result[ShortDayTextIndex + Day - 1] := 'weekday.' + DayKeys[Day] + '.short';
+  end;
+  for DatePart := Low(TDatePart) to High(TDatePart) do
+  begin
+    Result[DatePartTextIndex + Ord(DatePart)] := 'part.' + DatePartKeys[DatePart];
+    Result[ShortDatePartTextIndex + Ord(DatePart)] := 'part.' + DatePartKeys[DatePart] + '.short';
+  end;
+  for TimePart := Low(TTimePart) to High(TTimePart) do
+  begin
+    Result[TimePartTextIndex + Ord(TimePart)] := 'part.' + TimePartKeys[TimePart];
+    Result[ShortTimePartTextIndex + Ord(TimePart)] := 'part.' + TimePartKeys[TimePart] + '.short';
+  end;
+  for Error := Low(TError) to High(TError) do
+    Result[ErrorTextIndex + Ord(Error)] := 'error.' + ErrorKeys[Error];
+end;
+
+function Chrono.TLocale.Text(const Index: Integer): string;
+begin
+  if FFollowsFormatSettings and (Index < DatePartTextIndex) then
+    case Index of
+      MonthTextIndex..ShortMonthTextIndex - 1:
+        Result := FormatSettings.LongMonthNames[(Index - MonthTextIndex) mod 12 + 1];
+      ShortMonthTextIndex..DayTextIndex - 1:
+        Result := FormatSettings.ShortMonthNames[Index - ShortMonthTextIndex + 1];
+      DayTextIndex..ShortDayTextIndex - 1:
+        Result := FormatSettings.LongDayNames[Index - DayTextIndex + 1];
+    else
+      Result := FormatSettings.ShortDayNames[Index - ShortDayTextIndex + 1];
+    end
+  else
+    Result := FTexts[Index];
+end;
+
+function Chrono.TLocale.MonthName(const Month: TMonthNum): string;
+begin
+  Result := Text(MonthTextIndex + Month - 1);
+end;
+
+function Chrono.TLocale.GenitiveMonthName(const Month: TMonthNum): string;
+begin
+  Result := Text(GenitiveTextIndex + Month - 1);
+end;
+
+function Chrono.TLocale.ShortMonthName(const Month: TMonthNum): string;
+begin
+  Result := Text(ShortMonthTextIndex + Month - 1);
+end;
+
+function Chrono.TLocale.DayName(const Day: TWeekdayNum): string;
+begin
+  Result := Text(DayTextIndex + Day - 1);
+end;
+
+function Chrono.TLocale.ShortDayName(const Day: TWeekdayNum): string;
+begin
+  Result := Text(ShortDayTextIndex + Day - 1);
+end;
+
+function Chrono.TLocale.PartName(const Part: TDatePart; const Short: Boolean): string;
+begin
+  if Short then
+    Result := Text(ShortDatePartTextIndex + Ord(Part))
+  else
+    Result := Text(DatePartTextIndex + Ord(Part));
+end;
+
+function Chrono.TLocale.PartName(const Part: TTimePart; const Short: Boolean): string;
+begin
+  if Short then
+    Result := Text(ShortTimePartTextIndex + Ord(Part))
+  else
+    Result := Text(TimePartTextIndex + Ord(Part));
+end;
+
+function Chrono.TLocale.ErrorText(const Error: TError): string;
+begin
+  Result := Text(ErrorTextIndex + Ord(Error));
+end;
+
+function Chrono.TLocale.Apply(const FormatSettings: TFormatSettings; const Format: string): TFormatSettings;
+var
+  Genitive: Boolean;
+  Month: TMonthNum;
+  Day: TWeekdayNum;
+begin
+  Result := FormatSettings;
+  Genitive := NeedsGenitive(Format, FormatSettings);
+  for Month := Low(TMonthNum) to High(TMonthNum) do
+  begin
+    if Genitive then
+      Result.LongMonthNames[Month] := GenitiveMonthName(Month)
+    else
+      Result.LongMonthNames[Month] := MonthName(Month);
+    Result.ShortMonthNames[Month] := ShortMonthName(Month);
+  end;
+  for Day := Low(TWeekdayNum) to High(TWeekdayNum) do
+  begin
+    Result.LongDayNames[Day] := DayName(Day);
+    Result.ShortDayNames[Day] := ShortDayName(Day);
   end;
 end;
 
@@ -4809,28 +5494,24 @@ end;
 
 function Chrono.TDatePartHelper.GetName: string;
 begin
-  Localize;
-  Result := gLocalizedDatePart[Self];
+  Result := Chrono.FLocale.PartName(Self);
 end;
 
 function Chrono.TDatePartHelper.GetShortName: string;
 begin
-  Localize;
-  Result := gLocalizedDatePartShort[Self];
+  Result := Chrono.FLocale.PartName(Self, True);
 end;
 
 { Chrono.TTimePartHelper }
 
 function Chrono.TTimePartHelper.GetName: string;
 begin
-  Localize;
-  Result := gLocalizedTimePart[Self];
+  Result := Chrono.FLocale.PartName(Self);
 end;
 
 function Chrono.TTimePartHelper.GetShortName: string;
 begin
-  Localize;
-  Result := gLocalizedTimePartShort[Self];
+  Result := Chrono.FLocale.PartName(Self, True);
 end;
 
 {$IFDEF MSWINDOWS}
@@ -4852,17 +5533,29 @@ end;
 {$ENDIF}
 
 initialization
+  // The locales come first: every error message is taken from Chrono.Locale.
+  Chrono.TLocale.FEnglish := Chrono.TLocale.Create('en', nil, nil);
+  Chrono.TLocale.FSystem := Chrono.TLocale.Create('system', nil, nil);
+  Chrono.TLocale.FSystem.FFollowsFormatSettings := True;
+  Chrono.FLocale := Chrono.TLocale.FSystem;
   // Unconditional initialization BEFORE calling Init: guarantees a valid value
   // (FDay=1, Sunday) even on POSIX (where Init is not compiled at all, see the
   // {$IFDEF MSWINDOWS} below) and even if GetLocaleInfo inside Init fails
   // (the error is caught by an empty except and silently ignored).
   // Without this line FirstDayOfWeek.FDay would stay 0 (the default value of a
-  // class var), which is outside TWeekdayNum (1..7) and breaks the indexing of
-  // WeekdaysArray/DaysOfWeekArray in every week-related date calculation.
+  // class var), which is outside TWeekdayNum (1..7) and breaks every
+  // week-related date calculation.
   Chrono.FirstDayOfWeek.FDay := 1;
 {$IFDEF MSWINDOWS}
   Init;
 {$ENDIF}
   gDefaultCalendar := Chrono.TBasicCalendar.Create;
+
+finalization
+  Chrono.FLocale := nil;
+  Chrono.TLocale.FSystem.Free;
+  Chrono.TLocale.FSystem := nil;
+  Chrono.TLocale.FEnglish.Free;
+  Chrono.TLocale.FEnglish := nil;
 
 end.

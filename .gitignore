@@ -35,3 +35,6 @@ __recovery/
 
 # Test results
 dunitx-results.xml
+
+# Index files written by Markdown editors
+.mdindex

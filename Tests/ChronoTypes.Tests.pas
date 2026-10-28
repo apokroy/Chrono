@@ -8,7 +8,7 @@ unit ChronoTypes.Tests;
 interface
 
 uses
-  System.SysUtils, System.DateUtils, System.Variants,
+  System.SysUtils, System.DateUtils, System.Variants, System.Generics.Collections,
   DUnitX.TestFramework,
   ChronoTypes;
 
@@ -19,21 +19,25 @@ type
     [Test] procedure MatchesRtlForEveryDayFrom0001To9999;
     [Test] procedure StampIsCompatibleWithTimeStamp;
     [Test] procedure ZeroDateDecodesToDayBeforeEra;
-    [Test] procedure ImpossibleDateInsideTableRangeEncodesToZero;
+    [Test] procedure InvalidComponentsRaise;
+    [Test] procedure IsValidAndTryCreate;
     [Test] procedure Components;
     [Test] procedure DayOfYear;
     [Test] procedure WithMonthClampsDay;
     [Test] procedure WithYearHandlesFebruary29;
-    [Test] procedure WithDayDoesNotClamp;
+    [Test] procedure WithDayValidates;
     [Test] procedure ISORoundTrip;
     [Test] procedure Arithmetic;
+    [Test] procedure ArithmeticIsRangeChecked;
     [Test] procedure Comparison;
     [Test] procedure SystemDateTimeConversion;
     [Test] procedure VariantConversion;
+    [Test] procedure VariantAssignmentReleasesPreviousValue;
     [Test] procedure RangeAndSequence;
     [Test] procedure YearMonthQuarterDates;
     [Test] procedure MonthOfYearAndQuarterOfYear;
     [Test] procedure DayOfMonthOrdering;
+    [Test] procedure DayOfMonthValidation;
     [Test] procedure TodayMatchesRtl;
   end;
 
@@ -54,6 +58,8 @@ type
     [Test] procedure StartAndEndOfWeek;
     [Test] procedure NextAndPreviousWeekday;
     [Test] procedure SetWeekdayMovesWithinWeek;
+    [Test] procedure ArithmeticWrapsAroundTheWeek;
+    [Test] procedure NumbersAreValidated;
     [Test] procedure NamesAndParsing;
   end;
 
@@ -83,17 +89,19 @@ type
   TTimeTests = class
   public
     [Test] procedure Components;
+    [Test] procedure ComponentsAreValidated;
     [Test] procedure ISO;
     [Test] procedure MIME;
     [Test] procedure SystemDateTimeRoundTrip;
     [Test] procedure NamedUnits;
+    [Test] procedure ArithmeticWrapsAroundMidnight;
     [Test] procedure SubtractGivesDuration;
     [Test] procedure VariantConversion;
   end;
 
   /// <summary>
   ///  Regression tests for the compiler issue described next to
-  ///  Chrono.TDateTime.Implicit(Chrono.TDateTime): Variant in ChronoTypes.pas —
+  ///  Chrono.TDateTime.Explicit(Chrono.TDateTime): Variant in ChronoTypes.pas —
   ///  conversion from System.TDateTime must add DateDelta exactly once.
   /// </summary>
   [TestFixture]
@@ -106,6 +114,8 @@ type
     [Test] procedure VariantRoundTrip;
     [Test] procedure TimeStampRoundTrip;
     [Test] procedure DateBefore1899;
+    [Test] procedure JustBeforeMidnightRoundsIntoNextDay;
+    [Test] procedure ExplicitDateAndTimeCasts;
   end;
 
   [TestFixture]
@@ -117,6 +127,8 @@ type
     [Test] procedure SubtractGivesDuration;
     [Test] procedure AddPeriodKeepsTime;
     [Test] procedure StartAndEndOfDay;
+    [Test] procedure CreateFromDateIsMidnight;
+    [Test] procedure ArithmeticIsRangeChecked;
     [Test] procedure Comparison;
   end;
 
@@ -124,6 +136,9 @@ type
   TCalendarUnitTests = class
   public
     [Test] procedure LeapYearsMatchRtl;
+    [Test] procedure ComponentNumbersAreValidated;
+    [Test] procedure MonthAndQuarterArithmeticWraps;
+    [Test] procedure YearAndDayArithmeticIsRangeChecked;
     [Test] procedure MonthDays;
     [Test] procedure MonthNames;
     [Test] procedure QuarterParsing;
@@ -151,9 +166,32 @@ type
     [Test] procedure HolidaysAreNotWorkDays;
     [Test] procedure WorkDayOverrideWins;
     [Test] procedure DefaultCalendar;
+    [Test] procedure DateFlagsMatchDictionary;
+  end;
+
+  [TestFixture]
+  TLocaleTests = class
+  public
+    [TearDown] procedure TearDown;
+    [Test] procedure KeysAreUnique;
+    [Test] procedure EnglishTexts;
+    [Test] procedure SystemFollowsFormatSettings;
+    [Test] procedure LookupFallsBackToBase;
+    [Test] procedure ErrorWithOtherArgumentsFallsBack;
+    [Test] procedure RussianCoversEveryKey;
+    [Test] procedure LocaleNamesParameterlessMethods;
+    [Test] procedure FormatSettingsOverloadsKeepTheirNames;
+    [Test] procedure ParsingUsesLocale;
+    [Test] procedure ErrorsUseLocale;
+    [Test] procedure GenitiveAfterDayNumber;
+    [Test] procedure GenitiveInDefaultFormats;
+    [Test] procedure NilAndFreedLocaleRestoreSystem;
   end;
 
 implementation
+
+uses
+  ChronoTypes.Russian;
 
 function D(const Year, Month, Day: Word): Chrono.TDate;
 begin
@@ -180,6 +218,63 @@ begin
   Result := Value.Time.ISO;
 end;
 
+procedure AssertInvalidDate(const Year, Month, Day: Integer);
+var
+  Y, M, Dd: Integer;
+begin
+  Y := Year;
+  M := Month;
+  Dd := Day;
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := Chrono.TDate.Create(Y, M, Dd);
+    end, EConvertError, Format('%d-%d-%d', [Y, M, Dd]));
+  Assert.IsFalse(Chrono.TDate.IsValid(Y, M, Dd), Format('IsValid(%d, %d, %d)', [Y, M, Dd]));
+end;
+
+procedure AssertInvalidTime(const Hour, Minute, Second, MSec: Integer);
+var
+  H, M, S, MS: Integer;
+begin
+  H := Hour;
+  M := Minute;
+  S := Second;
+  MS := MSec;
+  Assert.WillRaise(
+    procedure
+    var
+      Time: Chrono.TTime;
+    begin
+      Time := Chrono.TTime.Create(H, M, S, MS);
+    end, EConvertError, Format('%d:%d:%d.%d', [H, M, S, MS]));
+  Assert.IsFalse(Chrono.TTime.IsValid(H, M, S, MS), Format('IsValid(%d, %d, %d, %d)', [H, M, S, MS]));
+end;
+
+type
+  // Sets a flag when destroyed; used to check that a Variant releases what it held.
+  TDestroyFlag = class(TInterfacedObject)
+  private
+    FDestroyed: PBoolean;
+  public
+    constructor Create(const Destroyed: PBoolean);
+    destructor Destroy; override;
+  end;
+
+constructor TDestroyFlag.Create(const Destroyed: PBoolean);
+begin
+  inherited Create;
+  FDestroyed := Destroyed;
+end;
+
+destructor TDestroyFlag.Destroy;
+begin
+  FDestroyed^ := True;
+  inherited;
+end;
+
 { TDateTests }
 
 procedure TDateTests.MatchesRtlForEveryDayFrom0001To9999;
@@ -189,7 +284,7 @@ var
   Y, M, Dd, RY, RM, RD: Word;
   Mismatch: string;
 begin
-  // Covers both the lookup tables (1970..2100) and the arithmetic path.
+  // Covers both the fast path for 1900..2100 and the general arithmetic.
   Mismatch := '';
   Last := DateTimeToTimeStamp(EncodeDate(9999, 12, 31)).Date;
   for N := 1 to Last do
@@ -233,12 +328,48 @@ begin
   Assert.AreEqual(0, Integer(Y));
   Assert.AreEqual(12, Integer(M));
   Assert.AreEqual(31, Integer(Dd));
+  Assert.AreEqual('0000-12-31', Chrono.TDate.Zero.ISO, 'ISO agrees with Decode');
 end;
 
-procedure TDateTests.ImpossibleDateInsideTableRangeEncodesToZero;
+procedure TDateTests.InvalidComponentsRaise;
 begin
-  Assert.AreEqual(0, Integer(D(2023, 2, 29)));
-  Assert.AreEqual(0, Integer(D(2024, 4, 31)));
+  // The same rules inside the lookup tables (1970..2100) and outside them.
+  AssertInvalidDate(2023, 2, 29);
+  AssertInvalidDate(2024, 4, 31);
+  AssertInvalidDate(2023, 13, 1);
+  AssertInvalidDate(2023, 0, 1);
+  AssertInvalidDate(2023, 1, 0);
+  AssertInvalidDate(2023, 1, 32);
+  AssertInvalidDate(2200, 2, 30);
+  AssertInvalidDate(2200, 13, 1);
+  AssertInvalidDate(1900, 2, 29);
+  AssertInvalidDate(0, 1, 1);
+  AssertInvalidDate(10000, 1, 1);
+  AssertInvalidDate(-1, 1, 1);
+  AssertInvalidDate(2024, 2, 65565); // would wrap to 29 if truncated to Word
+  // The typed overload checks the combination as well.
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := Chrono.TDate.Create(Chrono.TYear(2023), Chrono.February, Chrono.TDay(29));
+    end, EConvertError);
+end;
+
+procedure TDateTests.IsValidAndTryCreate;
+var
+  Date: Chrono.TDate;
+begin
+  Assert.IsTrue(Chrono.TDate.IsValid(2024, 2, 29));
+  Assert.IsTrue(Chrono.TDate.IsValid(1, 1, 1));
+  Assert.IsTrue(Chrono.TDate.IsValid(9999, 12, 31));
+  Assert.IsFalse(Chrono.TDate.IsValid(2023, 2, 29));
+
+  Assert.IsTrue(Chrono.TDate.TryCreate(2000, 2, 29, Date));
+  Assert.AreEqual('2000-02-29', Date.ISO);
+  Assert.IsFalse(Chrono.TDate.TryCreate(2100, 2, 29, Date));
+  Assert.AreEqual(0, Integer(Date));
 end;
 
 procedure TDateTests.Components;
@@ -271,6 +402,16 @@ begin
   Date := D(2023, 7, 4);
   Date.DayOfYear := 60;
   Assert.AreEqual('2023-03-01', Date.ISO);
+  Date.DayOfYear := 365;
+  Assert.AreEqual('2023-12-31', Date.ISO);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(2023, 7, 4);
+      Date.DayOfYear := 366;
+    end, EConvertError);
 end;
 
 procedure TDateTests.WithMonthClampsDay;
@@ -290,11 +431,27 @@ begin
   Assert.AreEqual('2031-08-09', D(2024, 8, 9).WithYear(2031).ISO);
 end;
 
-procedure TDateTests.WithDayDoesNotClamp;
+procedure TDateTests.WithDayValidates;
+var
+  Date: Chrono.TDate;
 begin
   Assert.AreEqual('2024-03-01', D(2024, 3, 15).WithDay(1).ISO);
-  // Documented behavior: the day is not clamped to the month length.
-  Assert.AreEqual(0, Integer(D(2023, 2, 10).WithDay(30)));
+  Assert.AreEqual('2024-02-29', D(2024, 2, 10).WithDay(29).ISO);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(2023, 2, 10).WithDay(29);
+    end, EConvertError);
+  // The setter leaves the date unchanged when it raises.
+  Date := D(2023, 4, 10);
+  try
+    Date.Day := 31;
+  except
+    on EConvertError do ;
+  end;
+  Assert.AreEqual('2023-04-10', Date.ISO);
 end;
 
 procedure TDateTests.ISORoundTrip;
@@ -334,6 +491,55 @@ begin
   Assert.AreEqual('2024-12-31', Date.ISO);
 end;
 
+procedure TDateTests.ArithmeticIsRangeChecked;
+begin
+  Assert.AreEqual('9999-12-31', Chrono.TDate(3652059).ISO);
+  Assert.AreEqual(0, Integer(Chrono.TDate(0)), 'Chrono.TDate(0) is TDate.Zero');
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(9999, 12, 31) + 1;
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(1, 1, 1) - 1;
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(9999, 12, 31);
+      Inc(Date);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(9999, 6, 1) + Chrono.TPeriod.FromYears(1);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := Chrono.TDate(-1);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := Chrono.TDate(3652060);
+    end, EConvertError);
+end;
+
 procedure TDateTests.Comparison;
 begin
   Assert.IsTrue(D(2024, 1, 1) < D(2024, 1, 2));
@@ -349,14 +555,22 @@ var
   Date: Chrono.TDate;
   Sys: System.TDateTime;
 begin
-  Date := EncodeDate(2024, 3, 15);
+  // System.TDateTime -> TDate drops the time, so it is an explicit conversion.
+  Date := Chrono.TDate(EncodeDate(2024, 3, 15));
   Assert.AreEqual('2024-03-15', Date.ISO);
-  Date := EncodeDateTime(2024, 3, 15, 18, 30, 0, 0); // the time part is dropped
+  Date := Chrono.TDate(EncodeDateTime(2024, 3, 15, 18, 30, 0, 0));
   Assert.AreEqual('2024-03-15', Date.ISO);
   Sys := D(2024, 3, 15);
   Assert.AreEqual(Double(EncodeDate(2024, 3, 15)), Double(Sys));
   Date := Chrono.TDate.Create(EncodeDate(1850, 6, 1));
   Assert.AreEqual('1850-06-01', Date.ISO);
+  Assert.WillRaise(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := Chrono.TDate(System.TDateTime(1E9));
+    end, EConvertError);
 end;
 
 procedure TDateTests.VariantConversion;
@@ -364,11 +578,33 @@ var
   V: Variant;
   Date: Chrono.TDate;
 begin
+  V := Variant(D(2024, 3, 15));
+  Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
+  Assert.AreEqual(Double(EncodeDate(2024, 3, 15)), Double(VarToDateTime(V)));
+  Date := Chrono.TDate(V);
+  Assert.AreEqual('2024-03-15', Date.ISO);
+  // Without the cast the value goes through System.TDateTime, with the same result.
   V := D(2024, 3, 15);
   Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
   Assert.AreEqual(Double(EncodeDate(2024, 3, 15)), Double(VarToDateTime(V)));
-  Date := V;
-  Assert.AreEqual('2024-03-15', Date.ISO);
+end;
+
+procedure TDateTests.VariantAssignmentReleasesPreviousValue;
+var
+  V: Variant;
+  Destroyed: Boolean;
+begin
+  Destroyed := False;
+  V := IInterface(TDestroyFlag.Create(@Destroyed));
+  V := Variant(D(2024, 3, 15));
+  Assert.IsTrue(Destroyed, 'the interface held by the Variant must be released');
+  Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
+
+  Destroyed := False;
+  V := IInterface(TDestroyFlag.Create(@Destroyed));
+  V := Variant(T(6, 30, 0));
+  Assert.IsTrue(Destroyed, 'the interface held by the Variant must be released');
+  Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
 end;
 
 procedure TDateTests.RangeAndSequence;
@@ -445,15 +681,35 @@ begin
   Assert.IsTrue(D(2024, 3, 16).DayOfMonth > A);
 end;
 
+procedure TDateTests.DayOfMonthValidation;
+var
+  DayOfMonth: Chrono.TDayOfMonth;
+begin
+  DayOfMonth := D(2024, 3, 15).DayOfMonth;
+  DayOfMonth.Day := 31;
+  Assert.AreEqual(31, Integer(Word(DayOfMonth.Day)));
+  // Setting the month clamps the day; without a year February has 29 days.
+  DayOfMonth.Month := Chrono.February;
+  Assert.AreEqual(29, Integer(Word(DayOfMonth.Day)));
+  Assert.WillRaise(
+    procedure
+    var
+      DayOfMonth: Chrono.TDayOfMonth;
+    begin
+      DayOfMonth := D(2024, 2, 1).DayOfMonth;
+      DayOfMonth.Day := 30;
+    end, EConvertError);
+end;
+
 procedure TDateTests.TodayMatchesRtl;
 var
   Before, After: Chrono.TDate;
   Today: Chrono.TDate;
 begin
   // Read the RTL date on both sides to stay correct if the test runs across midnight.
-  Before := System.SysUtils.Date;
+  Before := Chrono.TDate(System.SysUtils.Date());
   Today := Chrono.Today;
-  After := System.SysUtils.Date;
+  After := Chrono.TDate(System.SysUtils.Date());
   Assert.IsTrue((Today >= Before) and (Today <= After));
   Assert.IsTrue(Chrono.TYear.Current = Today.Year);
 end;
@@ -580,15 +836,63 @@ end;
 
 procedure TWeekdayTests.SetWeekdayMovesWithinWeek;
 var
+  Saved: Chrono.TWeekday;
   Date: Chrono.TDate;
 begin
-  Date := D(2024, 3, 14);
-  Date.Weekday := Chrono.Monday;
-  Assert.AreEqual('2024-03-11', Date.ISO);
-  Date.Weekday := Chrono.Saturday;
-  Assert.AreEqual('2024-03-16', Date.ISO);
-  Date.Weekday := Chrono.Sunday;
-  Assert.AreEqual('2024-03-10', Date.ISO);
+  // The week is the one StartOfWeek sees, so Sunday depends on the first day.
+  Saved := Chrono.FirstDayOfWeek;
+  try
+    Chrono.FirstDayOfWeek := Chrono.Monday;
+    Date := D(2024, 3, 14); // a Thursday
+    Date.Weekday := Chrono.Monday;
+    Assert.AreEqual('2024-03-11', Date.ISO);
+    Date.Weekday := Chrono.Saturday;
+    Assert.AreEqual('2024-03-16', Date.ISO);
+    Date.Weekday := Chrono.Sunday;
+    Assert.AreEqual('2024-03-17', Date.ISO);
+
+    Chrono.FirstDayOfWeek := Chrono.Sunday;
+    Date := D(2024, 3, 14);
+    Date.Weekday := Chrono.Sunday;
+    Assert.AreEqual('2024-03-10', Date.ISO);
+    Date.Weekday := Chrono.Saturday;
+    Assert.AreEqual('2024-03-16', Date.ISO);
+  finally
+    Chrono.FirstDayOfWeek := Saved;
+  end;
+end;
+
+procedure TWeekdayTests.ArithmeticWrapsAroundTheWeek;
+begin
+  Assert.AreEqual(WD(Chrono.Sunday), WD(Chrono.Saturday + 1));
+  Assert.AreEqual(WD(Chrono.Saturday), WD(Chrono.Sunday - 1));
+  Assert.AreEqual(WD(Chrono.Tuesday), WD(Chrono.Monday + 15));
+  Assert.AreEqual(WD(Chrono.Sunday), WD(Chrono.Wednesday - 10));
+  Assert.AreEqual(WD(Chrono.Monday), WD(Chrono.Monday + 7));
+  Assert.AreEqual(WD(Chrono.Friday), WD(Chrono.Friday - 70));
+  // The difference of two weekdays is not wrapped.
+  Assert.AreEqual(5, Chrono.Saturday - Chrono.Monday);
+  Assert.AreEqual(-5, Chrono.Monday - Chrono.Saturday);
+end;
+
+procedure TWeekdayTests.NumbersAreValidated;
+begin
+  Assert.AreEqual(WD(Chrono.Sunday), WD(Chrono.TWeekday(1)));
+  Assert.AreEqual(WD(Chrono.Saturday), WD(Chrono.TWeekday(7)));
+  Assert.WillRaise(
+    procedure
+    var
+      Day: Chrono.TWeekday;
+    begin
+      Day := Chrono.TWeekday(8);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Day: Chrono.TWeekday;
+    begin
+      Day := Chrono.TWeekday(0);
+    end, EConvertError);
 end;
 
 procedure TWeekdayTests.NamesAndParsing;
@@ -604,13 +908,13 @@ begin
   Assert.IsTrue(Day.TryParse('TUE', FInvariant));
   Assert.AreEqual(WD(Chrono.Tuesday), WD(Day));
   Assert.IsFalse(Day.TryParse('Funday', FInvariant));
-  Assert.WillRaise(
+  Assert.WillRaiseWithMessage(
     procedure
     var
       Bad: Chrono.TWeekday;
     begin
       Bad.Parse('Funday', TFormatSettings.Invariant);
-    end, EConvertError);
+    end, EConvertError, 'Invalid day of week name "Funday"');
 end;
 
 { TPeriodTests }
@@ -789,7 +1093,7 @@ begin
   Assert.AreEqual(13, Integer(Time.Hour));
   Assert.AreEqual(45, Integer(Time.Minute));
   Assert.AreEqual(30, Integer(Time.Second));
-  Assert.AreEqual(250, Integer(Time.MSecond));
+  Assert.AreEqual(250, Integer(Time.Millisecond));
   Assert.AreEqual(MSecs(13, 45, 30, 250), Integer(Time));
   Time.Decode(H, M, S, MS);
   Assert.AreEqual(13, Integer(H));
@@ -799,6 +1103,61 @@ begin
   Time.Minute := 5;
   Assert.AreEqual(MSecs(13, 5, 30, 250), Integer(Time));
   Assert.AreEqual(MSecs(23, 59, 59, 999), Integer(T(23, 59, 59, 999)));
+end;
+
+procedure TTimeTests.ComponentsAreValidated;
+var
+  Time: Chrono.TTime;
+begin
+  AssertInvalidTime(24, 0, 0, 0);
+  AssertInvalidTime(23, 60, 0, 0);
+  AssertInvalidTime(23, 59, 60, 0);
+  AssertInvalidTime(23, 59, 59, 1000);
+  AssertInvalidTime(-1, 0, 0, 0);
+  Assert.IsTrue(Chrono.TTime.IsValid(23, 59, 59, 999));
+
+  Assert.IsTrue(Chrono.TTime.TryCreate(7, 15, 0, Time));
+  Assert.AreEqual(MSecs(7, 15, 0), Integer(Time));
+  Assert.IsFalse(Chrono.TTime.TryCreate(7, 75, 0, Time));
+  Assert.AreEqual(0, Integer(Time));
+
+  // Raw values and named units outside one day are rejected as well.
+  Assert.WillRaise(
+    procedure
+    var
+      Time: Chrono.TTime;
+    begin
+      Time := Chrono.TTime(MSecsPerDay);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Time: Chrono.TTime;
+    begin
+      Time := Chrono.TTime(-1);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Time: Chrono.TTime;
+    begin
+      Time := Chrono.TTime(Chrono.THours(24));
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Time: Chrono.TTime;
+    begin
+      Time := T(10, 0, 0);
+      Time.Hour := 24;
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Time: Chrono.TTime;
+    begin
+      Time.MIME := '25:00';
+    end, EConvertError);
 end;
 
 procedure TTimeTests.ISO;
@@ -815,7 +1174,9 @@ procedure TTimeTests.MIME;
 var
   Time: Chrono.TTime;
 begin
-  Assert.AreEqual('134530', T(13, 45, 30).MIME);
+  Assert.AreEqual('13:45:30', T(13, 45, 30).MIME);
+  Time.MIME := T(13, 45, 30).MIME; // reading and writing use the same format
+  Assert.AreEqual(MSecs(13, 45, 30), Integer(Time));
   Time.MIME := '1:30 PM';
   Assert.AreEqual(MSecs(13, 30, 0), Integer(Time));
   Time.MIME := '12:00 AM';
@@ -832,10 +1193,11 @@ var
   Time: Chrono.TTime;
   Mismatch: string;
 begin
-  Time := EncodeTime(6, 0, 0, 0);
+  // System.TDateTime -> TTime drops the date, so it is an explicit conversion.
+  Time := Chrono.TTime(EncodeTime(6, 0, 0, 0));
   Assert.AreEqual(6, Integer(Time.Hour));
   Assert.AreEqual(0.25, Double(System.TDateTime(Time)), 1E-12);
-  Time := EncodeDateTime(2024, 3, 15, 23, 59, 59, 999); // the date part is dropped
+  Time := Chrono.TTime(EncodeDateTime(2024, 3, 15, 23, 59, 59, 999));
   Assert.AreEqual(MSecs(23, 59, 59, 999), Integer(Time));
 
   Mismatch := '';
@@ -870,6 +1232,31 @@ begin
   Assert.AreEqual(13 * 60, Integer(Chrono.TMinutes(Time)));
 end;
 
+procedure TTimeTests.ArithmeticWrapsAroundMidnight;
+var
+  Time: Chrono.TTime;
+  ThreeDays: Integer;
+begin
+  // A plain Integer means milliseconds. It has to be typed: an untyped constant
+  // fits the THours/TMinutes/TSeconds overloads equally well.
+  ThreeDays := MSecsPerDay * 3;
+  Assert.AreEqual('01:00:00', (T(23, 0, 0) + Chrono.THours(2)).ISO);
+  Assert.AreEqual('23:30:00', (T(0, 30, 0) - Chrono.THours(1)).ISO);
+  Assert.AreEqual('00:15:00', (T(23, 45, 0) + Chrono.TMinutes(30)).ISO);
+  Assert.AreEqual('23:59:30', (T(0, 0, 10) - Chrono.TSeconds(40)).ISO);
+  Assert.AreEqual('11:30:00', (T(12, 0, 0) + Chrono.TMinutes(-30)).ISO);
+  Assert.AreEqual(MSecs(10, 0, 0), Integer(T(10, 0, 0) + ThreeDays));
+  Assert.AreEqual(MSecs(23, 0, 0), Integer(T(22, 0, 0) + Chrono.TDuration.FromHours(25)));
+  Assert.AreEqual(MSecs(23, 30, 0), Integer(T(1, 0, 0) - Chrono.TDuration.FromMinutes(90)));
+  Assert.AreEqual(MSecs(1, 0, 0), Integer(T(1, 0, 0) + Chrono.TDuration.FromDays(1000)));
+
+  Time := T(23, 59, 59, 999);
+  Inc(Time);
+  Assert.AreEqual(0, Integer(Time));
+  Dec(Time);
+  Assert.AreEqual(MSecs(23, 59, 59, 999), Integer(Time));
+end;
+
 procedure TTimeTests.SubtractGivesDuration;
 begin
   Assert.AreEqual(Int64(MSecs(1, 30, 0)), (T(10, 0, 0) - T(8, 30, 0)).TotalMilliseconds);
@@ -881,10 +1268,14 @@ var
   V: Variant;
   Time: Chrono.TTime;
 begin
+  V := Variant(T(6, 30, 0));
+  Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
+  Time := Chrono.TTime(V);
+  Assert.AreEqual(MSecs(6, 30, 0), Integer(Time));
+  // Without the cast the value goes through System.TDateTime, with the same result.
   V := T(6, 30, 0);
   Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
-  Time := V;
-  Assert.AreEqual(MSecs(6, 30, 0), Integer(Time));
+  Assert.AreEqual(MSecs(6, 30, 0), Integer(Chrono.TTime(V)));
 end;
 
 { TSystemDateTimeConversionTests }
@@ -936,9 +1327,15 @@ var
   Value, Back: Chrono.TDateTime;
 begin
   Value := Chrono.TDateTime.Create(D(2024, 3, 15), T(10, 20, 30, 400));
-  V := Value;
+  V := Variant(Value);
   Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
   // The documented way back from a Variant goes through System.TDateTime.
+  Back := Chrono.TDateTime(System.TDateTime(V));
+  Assert.AreEqual('2024-03-15', Back.Date.ISO);
+  Assert.AreEqual(MSecs(10, 20, 30, 400), Integer(Back.Time));
+  // Without the cast the value goes through System.TDateTime, with the same result.
+  V := Value;
+  Assert.AreEqual(Integer(varDate), Integer(VarType(V)));
   Back := Chrono.TDateTime(System.TDateTime(V));
   Assert.AreEqual('2024-03-15', Back.Date.ISO);
   Assert.AreEqual(MSecs(10, 20, 30, 400), Integer(Back.Time));
@@ -975,6 +1372,37 @@ begin
   TS := Value;
   Assert.AreEqual(Integer(D(1850, 6, 1)), TS.Date);
   Assert.AreEqual(MSecs(18, 0, 0), TS.Time);
+end;
+
+procedure TSystemDateTimeConversionTests.JustBeforeMidnightRoundsIntoNextDay;
+var
+  Sys: System.TDateTime;
+  Value: Chrono.TDateTime;
+begin
+  // 0.6 ms before midnight rounds to midnight of the NEXT day, not of the same day.
+  Sys := EncodeDateTime(2024, 3, 15, 23, 59, 59, 999) + 0.6 / MSecsPerDay;
+  Value := Sys;
+  Assert.AreEqual('2024-03-16', Value.Date.ISO);
+  Assert.AreEqual(0, Integer(Value.Time));
+end;
+
+procedure TSystemDateTimeConversionTests.ExplicitDateAndTimeCasts;
+var
+  Sys: System.TDateTime;
+  V: Variant;
+  TS: TTimeStamp;
+begin
+  // Each path must add DateDelta exactly once (see the compiler issue noted in
+  // ChronoTypes.pas next to Chrono.TDateTime's Variant operator).
+  Sys := EncodeDateTime(2024, 3, 15, 10, 20, 30, 400);
+  Assert.AreEqual('2024-03-15', Chrono.TDate(Sys).ISO);
+  Assert.AreEqual(MSecs(10, 20, 30, 400), Integer(Chrono.TTime(Sys)));
+  V := Sys;
+  Assert.AreEqual('2024-03-15', Chrono.TDate(V).ISO);
+  Assert.AreEqual(MSecs(10, 20, 30, 400), Integer(Chrono.TTime(V)));
+  TS := DateTimeToTimeStamp(Sys);
+  Assert.AreEqual('2024-03-15', Chrono.TDate(TS).ISO);
+  Assert.AreEqual(MSecs(10, 20, 30, 400), Integer(Chrono.TTime(TS)));
 end;
 
 { TDateTimeTests }
@@ -1046,6 +1474,34 @@ begin
   Assert.AreEqual('06:00:00', TimeOf(Value.WithTime(T(6, 0, 0))));
 end;
 
+procedure TDateTimeTests.CreateFromDateIsMidnight;
+var
+  Value: Chrono.TDateTime;
+begin
+  Value := Chrono.TDateTime.Create(D(2024, 1, 1));
+  Assert.AreEqual('2024-01-01', Value.Date.ISO);
+  Assert.AreEqual(0, Integer(Value.Time));
+  Assert.IsTrue(Value = Chrono.TDateTime(D(2024, 1, 1)));
+end;
+
+procedure TDateTimeTests.ArithmeticIsRangeChecked;
+begin
+  Assert.WillRaise(
+    procedure
+    var
+      Value: Chrono.TDateTime;
+    begin
+      Value := Chrono.TDateTime.Create(D(9999, 12, 31), T(23, 0, 0)) + Chrono.TDuration.FromHours(2);
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      Value: Chrono.TDateTime;
+    begin
+      Value := Chrono.TDateTime.Create(D(1, 1, 1), T(1, 0, 0)) - Chrono.TDuration.FromHours(2);
+    end, EConvertError);
+end;
+
 procedure TDateTimeTests.Comparison;
 var
   A, B, C: Chrono.TDateTime;
@@ -1071,16 +1527,75 @@ begin
   for Year := 1 to 9999 do
     if Chrono.TYear(Year).IsLeap <> IsLeapYear(Year) then
       Assert.Fail('IsLeap(' + IntToStr(Year) + ')');
-  Assert.IsTrue(Chrono.TYear(0).IsLeap, 'year 0 is a leap year (proleptic Gregorian)');
+end;
+
+procedure TCalendarUnitTests.ComponentNumbersAreValidated;
+begin
+  Assert.AreEqual(1, Integer(Word(Chrono.TYear(1))));
+  Assert.AreEqual(9999, Integer(Word(Chrono.TYear(9999))));
+  Assert.WillRaise(procedure var Y: Chrono.TYear; begin Y := Chrono.TYear(0); end, EConvertError);
+  Assert.WillRaise(procedure var Y: Chrono.TYear; begin Y := Chrono.TYear(10000); end, EConvertError);
+  Assert.WillRaise(procedure var Y: Chrono.TYear; begin Y := Chrono.TYear('0'); end, EConvertError);
+  Assert.WillRaise(procedure var M: Chrono.TMonth; begin M := Chrono.TMonth(0); end, EConvertError);
+  Assert.WillRaise(procedure var M: Chrono.TMonth; begin M := Chrono.TMonth(13); end, EConvertError);
+  Assert.WillRaise(procedure var Day: Chrono.TDay; begin Day := Chrono.TDay(0); end, EConvertError);
+  Assert.WillRaise(procedure var Day: Chrono.TDay; begin Day := Chrono.TDay(32); end, EConvertError);
+  Assert.WillRaise(procedure var Day: Chrono.TDay; begin Day := Chrono.TDay('32'); end, EConvertError);
+  Assert.WillRaise(procedure var Q: Chrono.TQuarter; begin Q := Chrono.TQuarter(0); end, EConvertError);
+  Assert.WillRaise(procedure var Q: Chrono.TQuarter; begin Q := Chrono.TQuarter(5); end, EConvertError);
+  // Comparing with a number goes through the same validated conversion.
+  Assert.IsTrue(D(2024, 12, 1).Month = 12);
+  Assert.WillRaise(
+    procedure
+    begin
+      if D(2024, 12, 1).Month = 2024 then
+        Assert.Fail('2024 is not a month');
+    end, EConvertError);
+end;
+
+procedure TCalendarUnitTests.MonthAndQuarterArithmeticWraps;
+begin
+  Assert.AreEqual(1, Integer(Word(Chrono.December + 1)));
+  Assert.AreEqual(12, Integer(Word(Chrono.January - 1)));
+  Assert.AreEqual(4, Integer(Word(Chrono.March + 25)));
+  Assert.AreEqual(3, Integer(Word(Chrono.March - 24)));
+  Assert.AreEqual(1, Integer(Word(Chrono.Quarter4 + 1)));
+  Assert.AreEqual(4, Integer(Word(Chrono.Quarter1 - 1)));
+  Assert.AreEqual(1, Integer(Word(Chrono.Quarter2 + 7)));
+  // Differences are plain numbers.
+  Assert.AreEqual(-11, Chrono.January - Chrono.December);
+  Assert.AreEqual(3, Chrono.Quarter4 - Chrono.Quarter1);
+end;
+
+procedure TCalendarUnitTests.YearAndDayArithmeticIsRangeChecked;
+var
+  Day: Chrono.TDay;
+begin
+  Assert.AreEqual(2025, Integer(Word(Chrono.TYear(2024) + 1)));
+  Assert.AreEqual(2000, Integer(Word(Chrono.TYear(2024) - 24)));
+  Day := 30;
+  Inc(Day);
+  Assert.AreEqual(31, Integer(Word(Day)));
+  Assert.WillRaise(procedure var Y: Chrono.TYear; begin Y := Chrono.TYear(9999) + 1; end, EConvertError);
+  Assert.WillRaise(procedure var Y: Chrono.TYear; begin Y := Chrono.TYear(1) - 1; end, EConvertError);
+  Assert.WillRaise(procedure var Day: Chrono.TDay; begin Day := Chrono.TDay(31) + 1; end, EConvertError);
+  Assert.WillRaise(procedure var Day: Chrono.TDay; begin Day := 1; Dec(Day); end, EConvertError);
 end;
 
 procedure TCalendarUnitTests.MonthDays;
+var
+  Year: Word;
+  Month: Integer;
 begin
   Assert.AreEqual(29, Integer(Chrono.February.Days(2024)));
   Assert.AreEqual(28, Integer(Chrono.February.Days(1900)));
   Assert.AreEqual(29, Integer(Chrono.February.Days(2000)));
   Assert.AreEqual(30, Integer(Chrono.April.Days(2023)));
   Assert.AreEqual(31, Integer(Chrono.TMonthOfYear.Create(2023, Chrono.December).Days));
+  for Year := 1 to 9999 do
+    for Month := 1 to 12 do
+      if Integer(Chrono.TMonth(Month).Days(Year)) <> DaysInAMonth(Year, Month) then
+        Assert.Fail(Format('Days of %d-%d', [Year, Month]));
 end;
 
 procedure TCalendarUnitTests.MonthNames;
@@ -1093,13 +1608,13 @@ begin
   // Parsing uses the global FormatSettings, so build the input from it.
   Assert.AreEqual(3, Integer(Word(Chrono.TMonth(FormatSettings.LongMonthNames[3]))));
   Assert.AreEqual(11, Integer(Word(Chrono.TMonth(FormatSettings.ShortMonthNames[11]))));
-  Assert.WillRaise(
+  Assert.WillRaiseWithMessage(
     procedure
     var
       Month: Chrono.TMonth;
     begin
       Month := Chrono.TMonth('Smarch');
-    end, EConvertError);
+    end, EConvertError, 'Invalid month name "Smarch"');
 end;
 
 procedure TCalendarUnitTests.QuarterParsing;
@@ -1164,6 +1679,21 @@ begin
   for var Day in MY.Dates do
     Inc(Count);
   Assert.AreEqual(29, Count);
+
+  Assert.WillRaise(
+    procedure
+    var
+      MY: Chrono.TMonthOfYear;
+    begin
+      MY := Chrono.TMonthOfYear.Create(9999, Chrono.December) + 1;
+    end, EConvertError);
+  Assert.WillRaise(
+    procedure
+    var
+      MY: Chrono.TMonthOfYear;
+    begin
+      MY := Chrono.TMonthOfYear.Create(1, Chrono.January) - 1;
+    end, EConvertError);
 end;
 
 procedure TCalendarUnitTests.QuarterOfYearArithmetic;
@@ -1190,6 +1720,14 @@ begin
 
   QY := Chrono.TQuarterOfYear.Create(EncodeDate(2024, 5, 9));
   Assert.AreEqual(2, Integer(Word(QY.Quarter)));
+
+  Assert.WillRaise(
+    procedure
+    var
+      QY: Chrono.TQuarterOfYear;
+    begin
+      QY := Chrono.TQuarterOfYear.Create(9999, Chrono.Quarter4) + 1;
+    end, EConvertError);
 end;
 
 procedure TCalendarUnitTests.DatePartNames;
@@ -1202,7 +1740,7 @@ begin
     Assert.AreNotEqual('', DatePart.GetName);
     Assert.AreNotEqual('', DatePart.GetShortName);
   end;
-  for TimePart := Chrono.TTimePart.Hour to High(Chrono.TTimePart) do
+  for TimePart := Low(Chrono.TTimePart) to High(Chrono.TTimePart) do
   begin
     Assert.AreNotEqual('', TimePart.GetName);
     Assert.AreNotEqual('', TimePart.GetShortName);
@@ -1239,6 +1777,9 @@ begin
   Assert.AreEqual(-720, Integer(Chrono.TTimeZone('M').Bias));
   Assert.AreEqual(60, Integer(Chrono.TTimeZone('N').Bias));
   Assert.AreEqual(720, Integer(Chrono.TTimeZone('Y').Bias));
+  // Names are not case-sensitive (RFC 5322).
+  Assert.AreEqual(0, Integer(Chrono.TTimeZone('utc').Bias));
+  Assert.AreEqual(720, Integer(Chrono.TTimeZone('y').Bias));
 end;
 
 procedure TTimeZoneTests.UnknownZoneRaises;
@@ -1334,6 +1875,350 @@ begin
   Assert.IsTrue(ChronoTypes.DefaultCalendar <> Custom);
 end;
 
+procedure TBasicCalendarTests.DateFlagsMatchDictionary;
+var
+  Flags: Chrono.TDateFlags;
+  Reference: TDictionary<Integer, Boolean>;
+  I, Key: Integer;
+  Value, Expected: Boolean;
+begin
+  // Random inserts, overwrites and removals in a small key range, so that every
+  // operation hits both present and absent keys; then every key is compared.
+  RandSeed := 7;
+  Flags := Chrono.TDateFlags.Create;
+  Reference := TDictionary<Integer, Boolean>.Create;
+  try
+    for I := 1 to 5000 do
+    begin
+      Key := 738000 + Random(400);
+      if Random(4) = 0 then
+      begin
+        Flags.Remove(Key);
+        Reference.Remove(Key);
+      end
+      else
+      begin
+        Value := Random(2) = 0;
+        Flags.AddOrSetValue(Key, Value);
+        Reference.AddOrSetValue(Key, Value);
+      end;
+    end;
+    Assert.AreEqual(Integer(Reference.Count), Flags.Count);
+    for Key := 737990 to 738410 do
+    begin
+      Assert.AreEqual(Reference.TryGetValue(Key, Expected), Flags.TryGetValue(Key, Value), 'TryGetValue ' + IntToStr(Key));
+      Assert.AreEqual(Expected, Value, 'value ' + IntToStr(Key)); // both False for a missing key
+      Assert.AreEqual(Reference.ContainsKey(Key), Flags.ContainsKey(Key), 'ContainsKey ' + IntToStr(Key));
+    end;
+    Flags.Clear;
+    Assert.AreEqual(0, Flags.Count);
+    Assert.IsFalse(Flags.ContainsKey(738100));
+  finally
+    Reference.Free;
+    Flags.Free;
+  end;
+end;
+
+{ TLocaleTests }
+
+// The message of the EConvertError that Proc raises; the test fails if it raises none.
+function ConvertErrorMessage(const Proc: TProc): string;
+begin
+  try
+    Proc;
+  except
+    on E: EConvertError do
+      Exit(E.Message);
+  end;
+  Assert.Fail('EConvertError expected');
+end;
+
+procedure TLocaleTests.TearDown;
+begin
+  Chrono.Locale := nil;
+end;
+
+procedure TLocaleTests.KeysAreUnique;
+var
+  Keys: TArray<string>;
+  Seen: TDictionary<string, Boolean>;
+  Key: string;
+begin
+  Keys := Chrono.TLocale.Keys;
+  Assert.AreEqual(82, Integer(Length(Keys)));
+  Seen := TDictionary<string, Boolean>.Create;
+  try
+    for Key in Keys do
+    begin
+      Assert.IsFalse(Seen.ContainsKey(Key), Key);
+      Seen.Add(Key, True);
+    end;
+    Assert.IsTrue(Seen.ContainsKey('month.october.genitive'));
+    Assert.IsTrue(Seen.ContainsKey('weekday.monday.short'));
+    Assert.IsTrue(Seen.ContainsKey('part.millisecond'));
+    Assert.IsTrue(Seen.ContainsKey('error.date-range'));
+  finally
+    Seen.Free;
+  end;
+end;
+
+procedure TLocaleTests.EnglishTexts;
+var
+  English: Chrono.TLocale;
+begin
+  English := Chrono.TLocale.English;
+  Assert.AreEqual('October', English.MonthName(10));
+  Assert.AreEqual('October', English.GenitiveMonthName(10));
+  Assert.AreEqual('Oct', English.ShortMonthName(10));
+  Assert.AreEqual('Monday', English.DayName(2));
+  Assert.AreEqual('Mon', English.ShortDayName(2));
+  Assert.AreEqual('Year', English.PartName(Chrono.TDatePart.Year));
+  Assert.AreEqual('y', English.PartName(Chrono.TDatePart.Year, True));
+  Assert.AreEqual('Millisecond', English.PartName(Chrono.TTimePart.Millisecond));
+  Assert.AreEqual('ms', English.PartName(Chrono.TTimePart.Millisecond, True));
+  Assert.AreEqual('Date is outside the range 0001-01-01..9999-12-31', English.ErrorText(Chrono.TLocale.TError.DateRange));
+end;
+
+procedure TLocaleTests.SystemFollowsFormatSettings;
+var
+  Saved: string;
+begin
+  Assert.IsTrue(Chrono.Locale = Chrono.TLocale.System, 'the default locale');
+  Saved := FormatSettings.LongMonthNames[10];
+  try
+    FormatSettings.LongMonthNames[10] := 'Tenth';
+    Assert.AreEqual('Tenth', Chrono.October.ToString);
+    Assert.AreEqual('Tenth', Chrono.TLocale.System.GenitiveMonthName(10));
+    Assert.AreEqual('Tenth 2026', D(2026, 10, 27).Format('mmmm yyyy'));
+    Assert.AreEqual('27 Tenth', D(2026, 10, 27).Format('d mmmm'));
+  finally
+    FormatSettings.LongMonthNames[10] := Saved;
+  end;
+end;
+
+procedure TLocaleTests.LookupFallsBackToBase;
+var
+  Locale: Chrono.TLocale;
+begin
+  Locale := Chrono.TLocale.Create('xx', nil,
+    function(Key: string): string
+    begin
+      if Key = 'month.january' then
+        Result := 'Primo'
+      else
+        Result := '';
+    end);
+  try
+    Assert.AreEqual('xx', Locale.Name);
+    Assert.AreEqual('Primo', Locale.MonthName(1));
+    Assert.AreEqual('February', Locale.MonthName(2), 'nil Base is English');
+  finally
+    Locale.Free;
+  end;
+
+  Locale := Chrono.TLocale.Create('ru-xx', RussianLocale, nil);
+  try
+    Assert.AreEqual('Февраль', Locale.MonthName(2), 'a missing text comes from Base');
+  finally
+    Locale.Free;
+  end;
+end;
+
+procedure TLocaleTests.ErrorWithOtherArgumentsFallsBack;
+var
+  Locale: Chrono.TLocale;
+begin
+  Locale := Chrono.TLocale.Create('xx', nil,
+    function(Key: string): string
+    begin
+      if Key = 'error.invalid-year' then
+        Result := 'Bad year %s'
+      else if Key = 'error.invalid-date' then
+        Result := 'Day %2:d, month %1:d, year %0:d'
+      else if Key = 'error.date-range' then
+        Result := 'Out of range, 100%%'
+      else
+        Result := '';
+    end);
+  try
+    Assert.AreEqual(Chrono.TLocale.English.ErrorText(Chrono.TLocale.TError.InvalidYear),
+      Locale.ErrorText(Chrono.TLocale.TError.InvalidYear), '%s instead of three %d');
+    Assert.AreEqual('Day %2:d, month %1:d, year %0:d', Locale.ErrorText(Chrono.TLocale.TError.InvalidDate),
+      'the same arguments in another order');
+    Assert.AreEqual('Out of range, 100%%', Locale.ErrorText(Chrono.TLocale.TError.DateRange), '%% is not an argument');
+  finally
+    Locale.Free;
+  end;
+end;
+
+procedure TLocaleTests.RussianCoversEveryKey;
+var
+  English, Russian: Chrono.TLocale;
+  Month: Chrono.TMonthNum;
+  Day: Chrono.TWeekdayNum;
+  DatePart: Chrono.TDatePart;
+  TimePart: Chrono.TTimePart;
+  Error: Chrono.TLocale.TError;
+begin
+  // A key missing from the Russian table would fall back to the English text.
+  English := Chrono.TLocale.English;
+  Russian := RussianLocale;
+  for Month := Low(Chrono.TMonthNum) to High(Chrono.TMonthNum) do
+  begin
+    Assert.AreNotEqual(English.MonthName(Month), Russian.MonthName(Month));
+    Assert.AreNotEqual(English.GenitiveMonthName(Month), Russian.GenitiveMonthName(Month));
+    Assert.AreNotEqual(English.ShortMonthName(Month), Russian.ShortMonthName(Month));
+  end;
+  for Day := Low(Chrono.TWeekdayNum) to High(Chrono.TWeekdayNum) do
+  begin
+    Assert.AreNotEqual(English.DayName(Day), Russian.DayName(Day));
+    Assert.AreNotEqual(English.ShortDayName(Day), Russian.ShortDayName(Day));
+  end;
+  for DatePart := Low(Chrono.TDatePart) to High(Chrono.TDatePart) do
+  begin
+    Assert.AreNotEqual(English.PartName(DatePart), Russian.PartName(DatePart));
+    Assert.AreNotEqual(English.PartName(DatePart, True), Russian.PartName(DatePart, True));
+  end;
+  for TimePart := Low(Chrono.TTimePart) to High(Chrono.TTimePart) do
+  begin
+    Assert.AreNotEqual(English.PartName(TimePart), Russian.PartName(TimePart));
+    Assert.AreNotEqual(English.PartName(TimePart, True), Russian.PartName(TimePart, True));
+  end;
+  for Error := Low(Chrono.TLocale.TError) to High(Chrono.TLocale.TError) do
+    Assert.AreNotEqual(English.ErrorText(Error), Russian.ErrorText(Error));
+end;
+
+procedure TLocaleTests.LocaleNamesParameterlessMethods;
+begin
+  Chrono.Locale := RussianLocale;
+  Assert.AreEqual('ru', Chrono.Locale.Name);
+  Assert.AreEqual('Октябрь', Chrono.October.ToString);
+  Assert.AreEqual('окт', Chrono.October.ToString(True));
+  Assert.AreEqual('Октябрь', string(Chrono.October));
+  Assert.AreEqual('понедельник', Chrono.Monday.LongName);
+  Assert.AreEqual('понедельник', Chrono.Monday.ToString);
+  Assert.AreEqual('Пн', Chrono.Monday.ShortName);
+  Assert.AreEqual('Год', Chrono.TDatePart.Year.GetName);
+  Assert.AreEqual('дн', Chrono.TDatePart.Day.GetShortName);
+  Assert.AreEqual('мин', Chrono.TTimePart.Minute.GetShortName);
+  Assert.AreEqual('1г 3мес 10дн', Chrono.TPeriod.Create(1, 3, 10).ToString);
+  Assert.AreEqual('Октябрь 2026', Chrono.TMonthOfYear.Create(2026, Chrono.October).ToString);
+
+  Chrono.Locale := Chrono.TLocale.English;
+  Assert.AreEqual('October', Chrono.October.ToString);
+  Assert.AreEqual('1y 3m 10d', Chrono.TPeriod.Create(1, 3, 10).ToString);
+end;
+
+procedure TLocaleTests.FormatSettingsOverloadsKeepTheirNames;
+var
+  Invariant: TFormatSettings;
+begin
+  Chrono.Locale := RussianLocale;
+  Invariant := TFormatSettings.Invariant;
+  Assert.AreEqual('October', Chrono.October.ToString(Invariant));
+  Assert.AreEqual('Monday', Chrono.Monday.LongName(Invariant));
+  Assert.AreEqual('27 October 2026', D(2026, 10, 27).Format('d mmmm yyyy', Invariant));
+end;
+
+procedure TLocaleTests.ParsingUsesLocale;
+var
+  Day: Chrono.TWeekday;
+begin
+  Chrono.Locale := RussianLocale;
+  Assert.AreEqual(10, Integer(Word(Chrono.TMonth('Октябрь'))));
+  Assert.AreEqual(10, Integer(Word(Chrono.TMonth('октября'))), 'genitive');
+  Assert.AreEqual(10, Integer(Word(Chrono.TMonth('ОКТ'))), 'short, any case');
+  Assert.IsTrue(Day.TryParse('пн'));
+  Assert.AreEqual(WD(Chrono.Monday), WD(Day));
+  Day.Parse('Пятница');
+  Assert.AreEqual(WD(Chrono.Friday), WD(Day));
+  Assert.IsFalse(Day.TryParse('Monday'), 'English names are not Russian');
+  Assert.AreEqual('Неверное название месяца "Smarch"', ConvertErrorMessage(
+    procedure
+    var
+      Month: Chrono.TMonth;
+    begin
+      Month := Chrono.TMonth('Smarch');
+    end));
+end;
+
+procedure TLocaleTests.ErrorsUseLocale;
+begin
+  Chrono.Locale := RussianLocale;
+  Assert.AreEqual('Неверная дата: год 2024, месяц 2, день 30', ConvertErrorMessage(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(2024, 2, 30);
+    end));
+  Assert.AreEqual('Дата вне диапазона 0001-01-01..9999-12-31', ConvertErrorMessage(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(9999, 12, 31) + 1;
+    end));
+
+  Chrono.Locale := Chrono.TLocale.English;
+  Assert.AreEqual('Invalid date: year 2024, month 2, day 30', ConvertErrorMessage(
+    procedure
+    var
+      Date: Chrono.TDate;
+    begin
+      Date := D(2024, 2, 30);
+    end));
+end;
+
+procedure TLocaleTests.GenitiveAfterDayNumber;
+var
+  Date: Chrono.TDate;
+begin
+  Chrono.Locale := RussianLocale;
+  Date := D(2026, 10, 27);
+  Assert.AreEqual('27 октября 2026', Date.Format('d mmmm yyyy'));
+  Assert.AreEqual('вторник, 27 октября', Date.Format('dddd, d mmmm'));
+  Assert.AreEqual('Октябрь 2026', Date.Format('mmmm yyyy'), 'no day number - nominative');
+  Assert.AreEqual('вторник, Октябрь', Date.Format('dddd, mmmm'), 'a weekday name is not a day number');
+  Assert.AreEqual('d Октябрь', Date.Format('"d" mmmm'), 'quoted text is not a day number');
+  Assert.AreEqual('27 окт', Date.Format('d mmm'));
+  Assert.AreEqual('27 октября 2026 10:05',
+    Chrono.TDateTime.Create(Date, T(10, 5, 0)).Format('d mmmm yyyy hh:nn'));
+end;
+
+procedure TLocaleTests.GenitiveInDefaultFormats;
+var
+  Saved: TFormatSettings;
+  Date: Chrono.TDate;
+begin
+  Chrono.Locale := RussianLocale;
+  Date := D(2026, 10, 27);
+  Saved := FormatSettings;
+  try
+    FormatSettings.ShortDateFormat := 'd mmmm yyyy';
+    FormatSettings.LongDateFormat := 'dddd, d mmmm yyyy';
+    Assert.AreEqual('27 октября 2026', Date.ToString);
+    Assert.AreEqual('вторник, 27 октября 2026', Date.Format('dddddd'));
+    Assert.AreEqual('27 октября 2026', Chrono.TDateTime.Create(Date, Chrono.TTime.Zero).ToString);
+  finally
+    FormatSettings := Saved;
+  end;
+end;
+
+procedure TLocaleTests.NilAndFreedLocaleRestoreSystem;
+var
+  Locale: Chrono.TLocale;
+begin
+  Chrono.Locale := RussianLocale;
+  Chrono.Locale := nil;
+  Assert.IsTrue(Chrono.Locale = Chrono.TLocale.System);
+
+  Locale := Chrono.TLocale.Create('tmp', nil, nil);
+  Chrono.Locale := Locale;
+  Locale.Free;
+  Assert.IsTrue(Chrono.Locale = Chrono.TLocale.System, 'freeing the current locale');
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TDateTests);
   TDUnitX.RegisterTestFixture(TWeekdayTests);
@@ -1345,5 +2230,6 @@ initialization
   TDUnitX.RegisterTestFixture(TCalendarUnitTests);
   TDUnitX.RegisterTestFixture(TTimeZoneTests);
   TDUnitX.RegisterTestFixture(TBasicCalendarTests);
+  TDUnitX.RegisterTestFixture(TLocaleTests);
 
 end.

@@ -12,6 +12,7 @@ uses
   DUnitX.Loggers.Xml.NUnit,
   DUnitX.TestFramework,
   ChronoTypes in '..\Source\ChronoTypes.pas',
+  ChronoTypes.Russian in '..\Source\ChronoTypes.Russian.pas',
   ChronoTypes.Tests in 'ChronoTypes.Tests.pas';
 
 var

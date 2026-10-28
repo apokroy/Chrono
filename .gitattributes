@@ -1,13 +1,7 @@
 * text=auto
 
 *.pas text eol=crlf
-*.inc text eol=crlf
 *.dpr text eol=crlf
 *.ps1 text eol=crlf
 *.sh  text eol=lf
 *.md  text
-
-# Precomputed lookup tables: collapse them in diffs and exclude from language stats.
-Source/Chrono.DateYMD.inc linguist-generated=true
-Source/Chrono.YMDDate.inc linguist-generated=true
-Source/Chrono.Leap.inc    linguist-generated=true
