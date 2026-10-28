@@ -47,8 +47,8 @@ end;
 - **Time zone offsets** in `+HH:MM`, `+HHMM` and RFC 5322 named forms.
 - **Translatable**: month and weekday names, names of date and time units and
   error messages come from a `Chrono.TLocale`, with month names in the genitive
-  case where a language needs it ("27 октября 2026"). A Russian locale is
-  included, and a locale for any other language can be built from any
+  case where a language needs it ("27 октября 2026"). Locales for 13 languages
+  are included, and a locale for any other language can be built from any
   dictionary.
 - **Fast without lookup tables**: dates are encoded and decoded with a few
   integer multiplications, so the speed does not depend on what else the program
@@ -87,8 +87,8 @@ All types are nested in the `Chrono` record, which acts as a namespace, so they
 do not clash with `System.TDate`, `System.TTime` or `System.TDateTime`:
 write `Chrono.TDate`, `Chrono.TTime`, `Chrono.Monday`, `Chrono.February` and so on.
 
-For Russian texts, also copy `Source/ChronoTypes.Russian.pas` (see
-[Languages](#languages)).
+For texts in another language, also copy the unit of that language, such as
+`Source/ChronoTypes.German.pas` (see [Languages](#languages)).
 
 ## Types
 
@@ -171,8 +171,27 @@ for var Weekday in Chrono.WeekDays(Chrono.Monday) do
 The texts that Chrono produces itself — month and weekday names, names of date
 and time units, error messages — come from `Chrono.Locale`. By default it is
 `Chrono.TLocale.System`: month and weekday names of the global `FormatSettings`
-(that is, of the OS) and English for the rest. The Russian locale is in a
-separate unit:
+(that is, of the OS) and English for the rest. Other languages come in separate
+units, one per language:
+
+| Unit | Locale | `d mmmm yyyy` |
+|---|---|---|
+| `ChronoTypes.Russian` | `RussianLocale` | 27 октября 2026 |
+| `ChronoTypes.Ukrainian` | `UkrainianLocale` | 27 жовтня 2026 |
+| `ChronoTypes.Belarusian` | `BelarusianLocale` | 27 кастрычніка 2026 |
+| `ChronoTypes.Polish` | `PolishLocale` | 27 października 2026 |
+| `ChronoTypes.Czech` | `CzechLocale` | 27 října 2026 |
+| `ChronoTypes.German` | `GermanLocale` | 27 Oktober 2026 |
+| `ChronoTypes.French` | `FrenchLocale` | 27 octobre 2026 |
+| `ChronoTypes.Italian` | `ItalianLocale` | 27 ottobre 2026 |
+| `ChronoTypes.Spanish` | `SpanishLocale` | 27 octubre 2026 |
+| `ChronoTypes.Portuguese` | `PortugueseLocale` | 27 outubro 2026 |
+| `ChronoTypes.Dutch` | `DutchLocale` | 27 oktober 2026 |
+| `ChronoTypes.Danish` | `DanishLocale` | 27 oktober 2026 |
+| `ChronoTypes.Swedish` | `SwedishLocale` | 27 oktober 2026 |
+
+The month and weekday names are those of the Windows locale of the language, so
+a program prints the same names on every platform:
 
 ```pascal
 uses
@@ -196,20 +215,22 @@ table or a hash table:
 
 ```pascal
 var
-  German: Chrono.TLocale;
+  Finnish: Chrono.TLocale;
 begin
-  German := Chrono.TLocale.Create('de', Chrono.TLocale.English,
+  Finnish := Chrono.TLocale.Create('fi', Chrono.TLocale.English,
     function(Key: string): string        // no const: the signature of TFunc<string, string>
     begin
       if not Dictionary.TryGetValue(Key, Result) then
         Result := '';                    // empty: the text of the base locale (English here)
     end);
-  Chrono.Locale := German;
+  Chrono.Locale := Finnish;
 ```
 
 A translated error message must take the same `Format` arguments as the English
 one (in any order, `%1:d`); otherwise the base text is used, so a bad translation
-cannot break raising the error. `ChronoTypes.Russian.pas` lists every key and
+cannot break raising the error. `MissingKeys` lists the keys whose texts came
+from the base locale — empty when a translation is complete, so a forgotten or
+misspelt key shows up there. `ChronoTypes.Russian.pas` lists every key and
 serves as a template for another language.
 
 ### Working days

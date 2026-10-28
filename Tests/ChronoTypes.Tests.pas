@@ -178,7 +178,9 @@ type
     [Test] procedure SystemFollowsFormatSettings;
     [Test] procedure LookupFallsBackToBase;
     [Test] procedure ErrorWithOtherArgumentsFallsBack;
-    [Test] procedure RussianCoversEveryKey;
+    [Test] procedure EveryLanguageCoversEveryKey;
+    [Test] procedure NamesParseBackInEveryLanguage;
+    [Test] procedure LanguageSamples;
     [Test] procedure LocaleNamesParameterlessMethods;
     [Test] procedure FormatSettingsOverloadsKeepTheirNames;
     [Test] procedure ParsingUsesLocale;
@@ -191,7 +193,10 @@ type
 implementation
 
 uses
-  ChronoTypes.Russian;
+  ChronoTypes.Russian, ChronoTypes.Ukrainian, ChronoTypes.Belarusian, ChronoTypes.Polish,
+  ChronoTypes.Czech, ChronoTypes.German, ChronoTypes.French, ChronoTypes.Italian,
+  ChronoTypes.Spanish, ChronoTypes.Portuguese, ChronoTypes.Dutch, ChronoTypes.Danish,
+  ChronoTypes.Swedish;
 
 function D(const Year, Month, Day: Word): Chrono.TDate;
 begin
@@ -1933,6 +1938,13 @@ begin
   Assert.Fail('EConvertError expected');
 end;
 
+// The locales of the language units, in the order of TLocaleTests.LanguageSamples.
+function Languages: TArray<Chrono.TLocale>;
+begin
+  Result := [RussianLocale, UkrainianLocale, BelarusianLocale, PolishLocale, CzechLocale, GermanLocale,
+    FrenchLocale, ItalianLocale, SpanishLocale, PortugueseLocale, DutchLocale, DanishLocale, SwedishLocale];
+end;
+
 procedure TLocaleTests.TearDown;
 begin
   Chrono.Locale := nil;
@@ -2012,6 +2024,8 @@ begin
     Assert.AreEqual('xx', Locale.Name);
     Assert.AreEqual('Primo', Locale.MonthName(1));
     Assert.AreEqual('February', Locale.MonthName(2), 'nil Base is English');
+    Assert.AreEqual(81, Integer(Length(Locale.MissingKeys)));
+    Assert.AreEqual('month.february', Locale.MissingKeys[0]);
   finally
     Locale.Free;
   end;
@@ -2046,46 +2060,81 @@ begin
     Assert.AreEqual('Day %2:d, month %1:d, year %0:d', Locale.ErrorText(Chrono.TLocale.TError.InvalidDate),
       'the same arguments in another order');
     Assert.AreEqual('Out of range, 100%%', Locale.ErrorText(Chrono.TLocale.TError.DateRange), '%% is not an argument');
+    Assert.Contains(',' + string.Join(',', Locale.MissingKeys) + ',', ',error.invalid-year,', 'a rejected text is missing');
+    Assert.DoesNotContain(',' + string.Join(',', Locale.MissingKeys) + ',', ',error.invalid-date,');
   finally
     Locale.Free;
   end;
 end;
 
-procedure TLocaleTests.RussianCoversEveryKey;
+procedure TLocaleTests.EveryLanguageCoversEveryKey;
 var
-  English, Russian: Chrono.TLocale;
+  Locale: Chrono.TLocale;
+begin
+  // A forgotten or misspelt key, or an error message with other Format arguments, would
+  // silently be English. Comparing with the English texts cannot tell: German "Minute" and
+  // "Jan", "ms" everywhere are the same.
+  for Locale in Languages do
+    Assert.AreEqual('', string.Join(', ', Locale.MissingKeys), Locale.Name);
+end;
+
+procedure TLocaleTests.NamesParseBackInEveryLanguage;
+var
+  Locale: Chrono.TLocale;
   Month: Chrono.TMonthNum;
   Day: Chrono.TWeekdayNum;
-  DatePart: Chrono.TDatePart;
-  TimePart: Chrono.TTimePart;
-  Error: Chrono.TLocale.TError;
+  Weekday: Chrono.TWeekday;
+  Name: string;
 begin
-  // A key missing from the Russian table would fall back to the English text.
-  English := Chrono.TLocale.English;
-  Russian := RussianLocale;
-  for Month := Low(Chrono.TMonthNum) to High(Chrono.TMonthNum) do
+  // Parsing takes the first month or weekday with a matching name, in any case: a short name
+  // equal to a name of another month would parse to the wrong one.
+  for Locale in Languages do
   begin
-    Assert.AreNotEqual(English.MonthName(Month), Russian.MonthName(Month));
-    Assert.AreNotEqual(English.GenitiveMonthName(Month), Russian.GenitiveMonthName(Month));
-    Assert.AreNotEqual(English.ShortMonthName(Month), Russian.ShortMonthName(Month));
+    Chrono.Locale := Locale;
+    for Month := Low(Chrono.TMonthNum) to High(Chrono.TMonthNum) do
+      for Name in [Locale.MonthName(Month), Locale.GenitiveMonthName(Month), Locale.ShortMonthName(Month)] do
+        Assert.AreEqual(Integer(Month), Integer(Word(Chrono.TMonth(Name))), Locale.Name + ' ' + Name);
+    for Day := Low(Chrono.TWeekdayNum) to High(Chrono.TWeekdayNum) do
+      for Name in [Locale.DayName(Day), Locale.ShortDayName(Day)] do
+      begin
+        Assert.IsTrue(Weekday.TryParse(Name), Locale.Name + ' ' + Name);
+        Assert.AreEqual(Integer(Day), WD(Weekday), Locale.Name + ' ' + Name);
+      end;
   end;
-  for Day := Low(Chrono.TWeekdayNum) to High(Chrono.TWeekdayNum) do
+end;
+
+procedure TLocaleTests.LanguageSamples;
+const
+  // The name of the locale; 2026-10-27 as "d mmmm yyyy" and as "mmmm yyyy"; TPeriod 1, 3, 10.
+  Samples: array[0..12, 0..3] of string = (
+    ('ru', '27 октября 2026',      'Октябрь 2026',     '1г 3мес 10дн'),
+    ('uk', '27 жовтня 2026',       'жовтень 2026',     '1р 3міс 10дн'),
+    ('be', '27 кастрычніка 2026',  'кастрычнік 2026',  '1г 3мес 10дз'),
+    ('pl', '27 października 2026', 'październik 2026', '1r 3mies 10dz'),
+    ('cs', '27 října 2026',        'říjen 2026',       '1r 3měs 10d'),
+    ('de', '27 Oktober 2026',      'Oktober 2026',     '1J 3M 10T'),
+    ('fr', '27 octobre 2026',      'octobre 2026',     '1a 3mois 10j'),
+    ('it', '27 ottobre 2026',      'ottobre 2026',     '1a 3m 10g'),
+    ('es', '27 octubre 2026',      'octubre 2026',     '1a 3m 10d'),
+    ('pt', '27 outubro 2026',      'outubro 2026',     '1a 3m 10d'),
+    ('nl', '27 oktober 2026',      'oktober 2026',     '1j 3mnd 10d'),
+    ('da', '27 oktober 2026',      'oktober 2026',     '1år 3md 10d'),
+    ('sv', '27 oktober 2026',      'oktober 2026',     '1år 3mån 10d')
+  );
+var
+  Locales: TArray<Chrono.TLocale>;
+  I: Integer;
+begin
+  Locales := Languages;
+  Assert.AreEqual(Integer(Length(Samples)), Integer(Length(Locales)));
+  for I := 0 to High(Locales) do
   begin
-    Assert.AreNotEqual(English.DayName(Day), Russian.DayName(Day));
-    Assert.AreNotEqual(English.ShortDayName(Day), Russian.ShortDayName(Day));
+    Chrono.Locale := Locales[I];
+    Assert.AreEqual(Samples[I, 0], Locales[I].Name);
+    Assert.AreEqual(Samples[I, 1], D(2026, 10, 27).Format('d mmmm yyyy'), Samples[I, 0]);
+    Assert.AreEqual(Samples[I, 2], D(2026, 10, 27).Format('mmmm yyyy'), Samples[I, 0]);
+    Assert.AreEqual(Samples[I, 3], Chrono.TPeriod.Create(1, 3, 10).ToString, Samples[I, 0]);
   end;
-  for DatePart := Low(Chrono.TDatePart) to High(Chrono.TDatePart) do
-  begin
-    Assert.AreNotEqual(English.PartName(DatePart), Russian.PartName(DatePart));
-    Assert.AreNotEqual(English.PartName(DatePart, True), Russian.PartName(DatePart, True));
-  end;
-  for TimePart := Low(Chrono.TTimePart) to High(Chrono.TTimePart) do
-  begin
-    Assert.AreNotEqual(English.PartName(TimePart), Russian.PartName(TimePart));
-    Assert.AreNotEqual(English.PartName(TimePart, True), Russian.PartName(TimePart, True));
-  end;
-  for Error := Low(Chrono.TLocale.TError) to High(Chrono.TLocale.TError) do
-    Assert.AreNotEqual(English.ErrorText(Error), Russian.ErrorText(Error));
 end;
 
 procedure TLocaleTests.LocaleNamesParameterlessMethods;

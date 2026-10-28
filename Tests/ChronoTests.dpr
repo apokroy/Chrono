@@ -13,6 +13,18 @@ uses
   DUnitX.TestFramework,
   ChronoTypes in '..\Source\ChronoTypes.pas',
   ChronoTypes.Russian in '..\Source\ChronoTypes.Russian.pas',
+  ChronoTypes.Ukrainian in '..\Source\ChronoTypes.Ukrainian.pas',
+  ChronoTypes.Belarusian in '..\Source\ChronoTypes.Belarusian.pas',
+  ChronoTypes.Polish in '..\Source\ChronoTypes.Polish.pas',
+  ChronoTypes.Czech in '..\Source\ChronoTypes.Czech.pas',
+  ChronoTypes.German in '..\Source\ChronoTypes.German.pas',
+  ChronoTypes.French in '..\Source\ChronoTypes.French.pas',
+  ChronoTypes.Italian in '..\Source\ChronoTypes.Italian.pas',
+  ChronoTypes.Spanish in '..\Source\ChronoTypes.Spanish.pas',
+  ChronoTypes.Portuguese in '..\Source\ChronoTypes.Portuguese.pas',
+  ChronoTypes.Dutch in '..\Source\ChronoTypes.Dutch.pas',
+  ChronoTypes.Danish in '..\Source\ChronoTypes.Danish.pas',
+  ChronoTypes.Swedish in '..\Source\ChronoTypes.Swedish.pas',
   ChronoTypes.Tests in 'ChronoTypes.Tests.pas';
 
 var

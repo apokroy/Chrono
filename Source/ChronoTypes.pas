@@ -114,6 +114,7 @@ type
     private
       FName: string;
       FTexts: TArray<string>;
+      FMissingKeys: TArray<string>;
       // TLocale.System: the month and weekday names follow the global FormatSettings.
       FFollowsFormatSettings: Boolean;
       function  Text(const Index: Integer): string;
@@ -127,6 +128,12 @@ type
       destructor Destroy; override;
       /// <summary>The keys of all texts, in a fixed order.</summary>
       class function Keys: TArray<string>; static;
+      /// <summary>
+      ///  The keys whose texts came from Base: Lookup returned no text for them, or an error
+      ///  message with other Format arguments. Empty when a translation is complete, so it
+      ///  checks a table of your own; a misspelt key shows up here.
+      /// </summary>
+      function  MissingKeys: TArray<string>;
       /// <summary>Full month name standing alone: "October", "Октябрь".</summary>
       function  MonthName(const Month: TMonthNum): string;
       /// <summary>Full month name after a day number: "27 октября". Equal to MonthName in languages without cases.</summary>
@@ -5358,7 +5365,10 @@ begin
     if Assigned(Lookup) then
       Value := Lookup(AllKeys[I]);
     if (Value = '') or ((I >= ErrorTextIndex) and (FormatArguments(Value) <> FormatArguments(Fallback))) then
+    begin
       Value := Fallback;
+      FMissingKeys := FMissingKeys + [AllKeys[I]];
+    end;
     FTexts[I] := Value;
   end;
 end;
@@ -5402,6 +5412,12 @@ begin
   end;
   for Error := Low(TError) to High(TError) do
     Result[ErrorTextIndex + Ord(Error)] := 'error.' + ErrorKeys[Error];
+end;
+
+function Chrono.TLocale.MissingKeys: TArray<string>;
+begin
+  // A copy: the locale does not change after it is created.
+  Result := Copy(FMissingKeys);
 end;
 
 function Chrono.TLocale.Text(const Index: Integer): string;
