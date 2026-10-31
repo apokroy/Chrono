@@ -1251,8 +1251,9 @@ type
       class constructor Create;
       /// <summary>The index of a named zone in Timezones, or -1.</summary>
       class function  IndexOf(const Code: string): Integer; static;
-      /// <summary>Parses 2 digits of S starting at Index as a number (00..99). No bounds or digit checks — the caller must guarantee both.</summary>
-      class function  SNum(const S: string; const Index: Integer): Integer; inline; static;
+      /// <summary>Two decimal digits of S starting at Index as a number (00..99); False if either is not a digit. The
+      /// caller guarantees Index + 1 <= Length(S).</summary>
+      class function  TryNum(const S: string; const Index: Integer; out Value: Integer): Boolean; static;
     private
       FBias: TTimeZoneBias;
       function  GetMIME: string;
@@ -2206,34 +2207,39 @@ end;
 
 class operator Chrono.TTimeZone.Explicit(const A: string): TTimeZone;
 var
-  I: Integer;
+  I, Hours, Minutes: Integer;
+  Positional: Boolean;
 begin
   // Parses three positional formats: "+HH" (3 chars), "+HHMM" (5 chars) and
-  // "+HH:MM" (6 chars, colon checked at position 4). If the string matches none
-  // of them by length/content, we fall through to the named-zone lookup
-  // (the Timezones registry) and raise EConvertError if the name is not found
-  // there either. Note: a length matching no case branch (e.g. 4) goes STRAIGHT
-  // to the registry lookup without an intermediate raise — this is
-  // intentional, not a forgotten case. An empty string means UTC.
-  case Length(A) of
-    0:
-      Exit(TTimeZone(0));
-    3: //+HH
-      case A[1] of
-        '+': Exit(TTimeZone(-(SNum(A, 2) * 60)));
-        '-': Exit(TTimeZone(+(SNum(A, 2) * 60)));
-      end;
-    5: //+HHMM
-      case A[1] of
-        '+': Exit(TTimeZone(-(SNum(A, 2) * 60 + SNum(A, 4))));
-        '-': Exit(TTimeZone(+(SNum(A, 2) * 60 + SNum(A, 4))));
-      end;
-    6: //+HH:MM
-      if A[4] = ':' then
-        case A[1] of
-          '+': Exit(TTimeZone(-(SNum(A, 2) * 60 + SNum(A, 5))));
-          '-': Exit(TTimeZone(+(SNum(A, 2) * 60 + SNum(A, 5))));
-        end;
+  // "+HH:MM" (6 chars, colon checked at position 4), sign first and digits only.
+  // A positional offset must have minutes 00..59 and stay within 24 hours,
+  // otherwise EConvertError. A string that is not a positional offset by
+  // length/content falls through to the named-zone lookup (the Timezones
+  // registry) and raises EConvertError if the name is not found there either.
+  // An empty string means UTC.
+  Hours := 0;
+  Minutes := 0;
+  Positional := False;
+  if (Length(A) > 0) and ((A[1] = '+') or (A[1] = '-')) then
+    case Length(A) of
+      3: //+HH
+        Positional := TryNum(A, 2, Hours);
+      5: //+HHMM
+        Positional := TryNum(A, 2, Hours) and TryNum(A, 4, Minutes);
+      6: //+HH:MM
+        Positional := (A[4] = ':') and TryNum(A, 2, Hours) and TryNum(A, 5, Minutes);
+    end;
+  if Length(A) = 0 then
+    Exit(TTimeZone(0));
+
+  if Positional then
+  begin
+    if (Minutes > 59) or (Hours * 60 + Minutes > MinsPerDay) then
+      raise EConvertError.CreateFmt(Chrono.FLocale.ErrorText(Chrono.TLocale.TError.InvalidTimeZone), [A]);
+    if A[1] = '+' then
+      Exit(TTimeZone(-(Hours * 60 + Minutes)))
+    else
+      Exit(TTimeZone(Hours * 60 + Minutes));
   end;
 
   I := IndexOf(A);
@@ -2265,9 +2271,13 @@ begin
   Result.Bias := A;
 end;
 
-class function Chrono.TTimeZone.SNum(const S: string; const Index: Integer): Integer;
+class function Chrono.TTimeZone.TryNum(const S: string; const Index: Integer; out Value: Integer): Boolean;
 begin
-  Result := (Ord(S[Index]) - Ord('0')) * 10 + (Ord(S[Index + 1]) - Ord('0'));
+  Result := (S[Index] >= '0') and (S[Index] <= '9') and (S[Index + 1] >= '0') and (S[Index + 1] <= '9');
+  if Result then
+    Value := (Ord(S[Index]) - Ord('0')) * 10 + (Ord(S[Index + 1]) - Ord('0'))
+  else
+    Value := 0;
 end;
 
 class operator Chrono.TTimeZone.Subtract(const L, R: Chrono.TTimeZone): TMinutes;

@@ -152,6 +152,7 @@ type
   TTimeZoneTests = class
   public
     [Test] procedure ParseOffsets;
+    [Test] procedure BadOffsetRaises;
     [Test] procedure ParseNamedZones;
     [Test] procedure UnknownZoneRaises;
     [Test] procedure RegisterZone;
@@ -1779,6 +1780,20 @@ begin
   Assert.AreEqual(-300, Integer(Chrono.TTimeZone('+05').Bias));
   Assert.AreEqual(0, Integer(Chrono.TTimeZone('').Bias));
   Assert.AreEqual('+00:00', string(Chrono.TTimeZone('')));
+  Assert.AreEqual(-1440, Integer(Chrono.TTimeZone('+24:00').Bias));
+end;
+
+procedure TTimeZoneTests.BadOffsetRaises;
+begin
+  // A sign, digits only, minutes up to 59, at most 24 hours
+  for var Text in ['+0a', '+2x:00', '+03:75', '+2500', '-99:00'] do
+    Assert.WillRaise(
+      procedure
+      var
+        Zone: Chrono.TTimeZone;
+      begin
+        Zone := Chrono.TTimeZone(Text);
+      end, EConvertError, Text);
 end;
 
 procedure TTimeZoneTests.ParseNamedZones;

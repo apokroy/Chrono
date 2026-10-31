@@ -85,6 +85,9 @@ API may still change.
   midnight of the next day instead of an invalid time of the same day.
 - Converting a `TTimeZone` east of UTC to `TTime` raises `EConvertError` instead
   of returning an invalid time.
+- A positional time zone offset (`+HH`, `+HHMM`, `+HH:MM`) with a non-digit,
+  minutes above 59 or more than 24 hours raises `EConvertError` instead of giving
+  a zone with a made-up offset.
 - `TDate.Zero.ISO` gives `0000-12-31`, as `Decode` does, instead of `0000-00-00`.
 - `TWeekday.Parse` reports an invalid day of week name instead of an invalid date.
 - Unit names were English on every platform but Windows.
