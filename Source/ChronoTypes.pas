@@ -1465,16 +1465,16 @@ type
     // Validation helpers. The Checked* functions return a valid value or raise
     // EConvertError through the Error* procedures, which are kept out of line so
     // that the inlined checks stay small.
-    class procedure ErrorYear(const Value: Integer); static;
-    class procedure ErrorMonth(const Value: Integer); static;
-    class procedure ErrorDay(const Value: Integer); static;
-    class procedure ErrorQuarter(const Value: Integer); static;
-    class procedure ErrorWeekday(const Value: Integer); static;
-    class procedure ErrorDate(const Year, Month, Day: Integer); static;
-    class procedure ErrorDayOfYear(const Value, Year: Integer); static;
-    class procedure ErrorDateRange; static;
-    class procedure ErrorTime(const Hour, Minute, Second, MSec: Integer); static;
-    class procedure ErrorTimeRange(const MSecs: Int64); static;
+    class procedure ErrorYear(const Value: Integer); static; noreturn;
+    class procedure ErrorMonth(const Value: Integer); static; noreturn;
+    class procedure ErrorDay(const Value: Integer); static; noreturn;
+    class procedure ErrorQuarter(const Value: Integer); static; noreturn;
+    class procedure ErrorWeekday(const Value: Integer); static; noreturn;
+    class procedure ErrorDate(const Year, Month, Day: Integer); static; noreturn;
+    class procedure ErrorDayOfYear(const Value, Year: Integer); static; noreturn;
+    class procedure ErrorDateRange; static; noreturn;
+    class procedure ErrorTime(const Hour, Minute, Second, MSec: Integer); static; noreturn;
+    class procedure ErrorTimeRange(const MSecs: Int64); static; noreturn;
     class function  CheckedYear(const Value: Integer): Word; static; inline;
     class function  CheckedMonth(const Value: Integer): Word; static; inline;
     class function  CheckedDay(const Value: Integer): Word; static; inline;
